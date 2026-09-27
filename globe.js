@@ -182,13 +182,46 @@
   // just one; archipelago-style provinces have several). "globeRings" is
   // the same, each independently simplified for the globe and filtered
   // down to only the rings that are actually usable polygon geometry.
+  // d3-geo's spherical polygons are NOT winding-agnostic the way flat SVG
+  // fills are: a ring has to be wound counter-clockwise (as seen from
+  // outside the sphere) for d3-geo to treat its INSIDE as the small
+  // intended area; wound the other way, it treats the polygon's interior
+  // as "the entire rest of the sphere except this shape" instead.
+  // Converting from SVG's y-down pixel space to lon/lat's y-up
+  // (north-is-positive-lat) space flips the effective winding of every
+  // ring, and confirmed against the real d3-geo library, this data's
+  // original winding came out backwards for the globe as a result: every
+  // ring reported d3.geoArea() of ~4*PI steradians (the whole sphere)
+  // instead of the small fraction a several-degree-wide province should
+  // have.
+  //
+  // A single blanket reversal fixes most provinces, but not all of them:
+  // archipelago-style provinces have several independent subpaths (one
+  // per island) in the source 'd', and those subpaths turn out to NOT all
+  // share the same winding direction in the original data - so after one
+  // global reversal, some of a province's rings end up correctly wound
+  // and others still backwards (confirmed via d3.geoArea() on real
+  // multi-ring provinces: e.g. one 5-ring province still measured ~4x a
+  // full sphere, implying 4 of its 5 rings were still inverted). The fix
+  // has to be per-ring: reverse only the specific rings that measure as
+  // "backwards" on their own, using d3.geoArea() with a 2*PI (half-sphere)
+  // threshold - any legitimately small province ring will be far below
+  // that, while an inverted one will read close to 4*PI.
+  function fixRingWinding(ring){
+    if (typeof d3 === 'undefined' || !d3.geoArea || ring.length < 4) return ring;
+    const area = d3.geoArea({ type: 'Polygon', coordinates: [ring] });
+    return area > 2 * Math.PI ? ring.slice().reverse() : ring;
+  }
+
   const baseProvinces = PROVINCES.map(function(p){
     const subpaths = getPathSubrings(p.d);
     const rings = subpaths.map(function(pts){
-      return pts.map(function(pt){ return toLonLat(pt[0], pt[1]); });
+      const ring = pts.map(function(pt){ return toLonLat(pt[0], pt[1]); });
+      ring.reverse();
+      return fixRingWinding(ring);
     });
     const globeRings = rings
-      .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
+      .map(function(ring){ return fixRingWinding(simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE)); })
       .filter(isUsableRing);
     return {
       id: p.id,
@@ -717,62 +750,29 @@
     noDataBanner.classList.add('show');
   }
 
-  // Load d3-geo from a CDN dynamically (rather than a static <script> tag
-  // in globe.html) so a second source can be tried automatically if the
-  // first is unreachable - a single CDN being blocked by a network filter,
-  // extension, or DNS-level ad blocker is a real, observed failure mode
-  // here (this is very likely what silently broke the earlier globe.gl
-  // version too, which loaded from the same CDN). Also means d3 is only
-  // ever fetched if someone actually opens the globe view, not on every
-  // page load.
-  // Deliberately spread across different CDN providers, not just different
-  // URLs on the same one, so one provider being blocked doesn't take out
-  // every entry in the list. The third entry is the full d3 bundle (which
-  // includes d3-geo) from a different CDN entirely (cdnjs/Cloudflare) as a
-  // last resort - it still attaches everything to window.d3, same as the
-  // standalone d3-geo builds.
-  const D3_GEO_SOURCES = [
-    'https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/dist/d3-geo.min.js',
-    'https://unpkg.com/d3-geo@3.1.1/dist/d3-geo.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js',
-  ];
-
-  function loadScriptOnce(src){
-    return new Promise(function(resolve, reject){
-      const el = document.createElement('script');
-      el.src = src;
-      el.onload = function(){ resolve(); };
-      el.onerror = function(){ reject(new Error('could not load ' + src)); };
-      document.head.appendChild(el);
-    });
-  }
-
-  let ensureD3Promise = null;
-  function ensureD3(){
-    if (ensureD3Promise) return ensureD3Promise;
-    if (typeof d3 !== 'undefined' && d3.geoOrthographic){
-      ensureD3Promise = Promise.resolve();
-      return ensureD3Promise;
-    }
-    ensureD3Promise = D3_GEO_SOURCES.reduce(function(chain, src){
-      return chain.catch(function(){ return loadScriptOnce(src); });
-    }, Promise.reject(new Error('no source tried yet')))
-      .then(function(){
-        if (typeof d3 === 'undefined' || !d3.geoOrthographic){
-          throw new Error('a d3-geo script loaded but did not define d3.geoOrthographic (unexpected build)');
-        }
-      })
-      .catch(function(e){
-        throw new Error('d3-geo could not be loaded from any source (' + D3_GEO_SOURCES.length +
-          ' tried) - check your network connection, or whether an ad blocker / content filter is blocking ' +
-          'cdn.jsdelivr.net, unpkg.com or cdnjs.cloudflare.com. Underlying error: ' + e.message);
-      });
-    return ensureD3Promise;
-  }
-
+  // d3-geo used to be loaded from a CDN (first a single jsdelivr <script>
+  // tag, then a fallback chain across three different CDN providers after
+  // that turned out to be unreachable for at least one real visitor). Even
+  // the fallback chain hit a case where a <script> tag fired 'onload'
+  // (reported success) without actually defining d3.geoOrthographic - which
+  // points to something (most likely a content-blocking browser extension)
+  // intercepting the request and returning an empty "success" response
+  // specifically to defeat onerror-based fallback logic like that. So
+  // d3-geo is now vendored locally instead (vendor/d3-geo.min.js, loaded by
+  // a plain <script> tag in globe.html, same origin as the page itself) -
+  // no CDN, no network request to anything that could plausibly be
+  // targeted by a blocklist. This check just confirms that file actually
+  // loaded and defined what it should.
   function buildGlobeView(){
     if (globeBuilt) return;
     globeBuilt = true;
+
+    if (typeof d3 === 'undefined' || !d3.geoOrthographic){
+      handleGlobeFailure(new Error('vendor/d3-geo.min.js did not define d3.geoOrthographic - the file may be ' +
+        'missing, failed to load, or a browser extension is interfering with it even though it\'s hosted on ' +
+        'this same site now'));
+      return;
+    }
 
     try {
       globeSvg.setAttribute('viewBox', '0 0 ' + GLOBE_VB_SIZE + ' ' + GLOBE_VB_SIZE);
@@ -878,17 +878,8 @@
     flatStage.hidden = true;
     projGlobeBtn.classList.add('active');
     projFlatBtn.classList.remove('active');
-    if (globeBuilt) return; // already built (or already failed and fell back)
-    ensureD3()
-      .then(function(){
-        buildGlobeView();
-        if (!globeReady) globeHasFailedOnce = true;
-      })
-      .catch(function(e){
-        globeBuilt = true;
-        globeHasFailedOnce = true;
-        handleGlobeFailure(e);
-      });
+    buildGlobeView();
+    if (!globeReady) globeHasFailedOnce = true;
   }
   function showFlatView(){
     globeStage.hidden = true;

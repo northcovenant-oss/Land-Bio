@@ -77,14 +77,21 @@
 <script src="data.js"></script>
 <script src="claims.js"></script>
 <!--
-  d3-geo is NOT loaded here with a static <script> tag. globe.js loads it
-  dynamically the first time someone actually opens the Globe view, and
-  tries a couple of different CDNs in turn (jsdelivr, then unpkg, then
-  esm.sh) rather than depending on a single source - a static tag to one
-  CDN has no fallback if that CDN happens to be blocked by a network
-  filter or browser extension, which is a real failure mode that was
-  observed here. See ensureD3() in globe.js.
+  d3-geo is vendored locally (vendor/d3-geo.min.js) rather than loaded
+  from a CDN. It was originally loaded from cdn.jsdelivr.net, then from a
+  short list of CDN fallbacks after that one turned out to be unreachable
+  for at least one real visitor - but even the fallback list hit a case
+  where a script tag reported success (fired 'onload') without actually
+  defining d3.geoOrthographic, which points to something (most likely a
+  content-blocking browser extension) intercepting the request and
+  returning an empty "success" response rather than failing outright, to
+  defeat exactly this kind of fallback logic. Self-hosting the file
+  removes the CDN from the picture entirely: it's now the same origin as
+  the page itself. See vendor/LICENSE-d3-geo.txt for attribution (ISC
+  license, Mike Bostock) - it bundles d3-geo, d3-array and internmap,
+  built from their published source with esbuild.
 -->
+<script src="vendor/d3-geo.min.js"></script>
 <script src="globe.js"></script>
 <script src="theme.js"></script>
 </body>
