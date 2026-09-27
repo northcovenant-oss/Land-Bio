@@ -894,6 +894,9 @@
     // would just be one more thing to strip out before pasting.
     const adminInfo = [
       nationName,
+      document.getElementById('identityClassification').value.trim(),
+      document.getElementById('identityCapital').value.trim(),
+      document.getElementById('identityGovernment').value.trim(),
       snapshot.economyType || '',
       snapshot.gdp || '',
       snapshot.foodProduction || '',
