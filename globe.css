@@ -1,13 +1,13 @@
 /*
- * GLOBE / FLAT-MAP PAGE STYLES
- * ----------------------------
+ * NATIONS-OF-RYLET MAP PAGE STYLES
+ * ---------------------------------
  * Extra styles specific to globe.html, layered on top of the shared
  * variables and base layout (.app, .map-wrap, .map-frame, .panel, .legend,
  * .tooltip, .zoom-controls, .theme-dropdown, etc.) already defined in
  * style.css. Only what's new or different from the claim map lives here.
  */
 
-/* ---------- Projection toggle (Globe / Flat Map) ---------- */
+/* ---------- Projection toggle (Flat Map / Globe) ---------- */
 .projection-toggle{
   display:flex;
   background: var(--panel-bg);
@@ -30,33 +30,25 @@
 .projection-btn:hover{ color: var(--ink); background: rgba(0,0,0,0.05); }
 .projection-btn.active{ background: var(--gold); color: #fff; }
 
-/* ---------- Globe stage ---------- */
+/* ---------- Flat map + globe stages (reuse .map-frame svg sizing from style.css) ---------- */
 .globe-frame{
   overflow: hidden;
 }
-.globe-stage{
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at 50% 40%, #1c2a3d 0%, #0a0f18 75%);
-}
-.globe-stage canvas{ display:block; }
-.globe-stage .scene-tooltip{
-  font-family: var(--font-body);
-}
-
-/* ---------- Flat map stage (reuses .map-frame svg sizing from style.css) ---------- */
-.flat-stage{
+.flat-stage, .globe-stage{
   position: absolute;
   inset: 0;
 }
-.flat-stage[hidden]{ display:none; }
-.globe-stage[hidden]{ display:none; }
-#flatSvg{
+.flat-stage[hidden], .globe-stage[hidden]{ display:none; }
+#flatSvg, #globeSvg{
   width:100%;
   height:100%;
   display:block;
   touch-action: none;
 }
+.globe-stage{ cursor: grab; }
+.globe-stage.dragging{ cursor: grabbing; }
+#globeSvg .globe-sphere{ fill: var(--panel-bg, #bae3ff); }
+#globeSvg .globe-graticule{ fill:none; stroke: rgba(0,0,0,0.08); stroke-width: 0.5; }
 
 /*
  * No per-province stroke by default: adjacent provinces belonging to the
@@ -224,7 +216,3 @@ path.nation-province.picked{ filter: brightness(1.2); stroke: var(--gold-bright)
 }
 
 .nation-legend .legend-swatch{ border-radius: 50%; }
-
-@media (max-width: 760px){
-  .projection-btn{ padding:6px 10px; font-size:12px; }
-}

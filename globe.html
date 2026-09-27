@@ -12,8 +12,8 @@
 <div class="app">
   <div class="site-controls">
     <div class="projection-toggle" id="projectionToggle" role="group" aria-label="Map projection">
-      <button class="projection-btn active" id="projGlobeBtn" data-projection="globe">&#127760; Globe</button>
-      <button class="projection-btn" id="projFlatBtn" data-projection="flat">&#128506;&#65039; Flat Map</button>
+      <button class="projection-btn active" id="projFlatBtn" data-projection="flat">&#128506;&#65039; Flat Map</button>
+      <button class="projection-btn" id="projGlobeBtn" data-projection="globe">&#127760; Globe</button>
     </div>
 
     <div class="theme-dropdown" id="themeDropdown">
@@ -49,15 +49,17 @@
       <div class="no-data-banner" id="noDataBanner"></div>
       <div class="legend nation-legend" id="nationLegend"></div>
 
-      <div class="globe-stage" id="globeViz"></div>
-
-      <div class="flat-stage" id="flatStage" hidden>
+      <div class="flat-stage" id="flatStage">
         <div class="zoom-controls" id="zoomControls">
           <button class="zoom-btn" id="zoomIn" title="Zoom in">&#43;</button>
           <button class="zoom-btn" id="zoomOut" title="Zoom out">&#8722;</button>
           <button class="zoom-btn zoom-reset" id="zoomReset" title="Reset view">&#8635;</button>
         </div>
         <svg id="flatSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+
+      <div class="globe-stage" id="globeStage" hidden>
+        <svg id="globeSvg" xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
 
       <div class="tooltip" id="tooltip"></div>
@@ -74,7 +76,17 @@
 
 <script src="data.js"></script>
 <script src="claims.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/globe.gl@2"></script>
+<!--
+  d3-geo only - not the full d3 bundle. Gives us geoOrthographic,
+  geoPath and geoGraticule; drag-to-rotate and zoom are hand-rolled in
+  globe.js with plain pointer events, so d3-selection/d3-drag aren't
+  needed. This is a pure 2D SVG projection (the same technique used for
+  countless "spinnable globe" choropleths) - no 3D scene, no WebGL, no
+  polygon triangulation library - so there's a much smaller and much
+  better-tested surface for something to go wrong in than the earlier
+  three.js/globe.gl approach had.
+-->
+<script src="https://cdn.jsdelivr.net/npm/d3-geo@3"></script>
 <script src="globe.js"></script>
 <script src="theme.js"></script>
 </body>

@@ -5,26 +5,29 @@
  * page shows who already holds what, in two projections of the exact same
  * data:
  *
- *   - "Globe": a real 3D sphere (globe.gl / three-globe), built by treating
- *     data.js's province coordinates as an equirectangular projection.
- *     VIEWBOX is "0 0 1917.7 958.84998" - an exact 2:1 ratio - so every
- *     point (x, y) converts directly to (lon, lat) with no distortion
- *     correction needed:
- *       lon = (x / 1917.7) * 360 - 180
- *       lat = 90 - (y / 958.84998) * 180
- *
+ *   - "Globe": a spinnable orthographic globe, built with d3-geo (d3's
+ *     geoOrthographic projection + geoPath, both pure 2D SVG math - no
+ *     3D scene, no WebGL, no polygon triangulation library). Earlier
+ *     versions of this page used globe.gl/three-globe for a "real" 3D
+ *     sphere; that pulled in a much larger, harder-to-verify rendering
+ *     pipeline (triangulating every province into an extruded 3D solid)
+ *     and repeated bugs there (wrong colors, provinces missing) were
+ *     never fully pinned down. d3-geo's orthographic projection is a
+ *     much smaller, far more battle-tested piece of code doing the exact
+ *     same "spinnable globe" job as an SVG projection instead - the same
+ *     technique behind most of the globe choropleths on the web.
  *   - "Flat Map": the same province paths drawn in their native pixel
  *     space. Because that space is already equirectangular, this is
  *     literally just index.html's map with a different fill rule (by
- *     nation instead of by econ/climate) - no second coordinate system
- *     needed.
+ *     nation instead of by econ/climate) - no coordinate conversion
+ *     needed at all.
  *
  * Ownership comes from window.ClaimsStore (claims.js), the same live feed
  * index.html already uses to grey out taken provinces. The richer
- * per-nation info in the side panel (classification, GDP, specializations,
+ * per-nation info in the info popup (classification, GDP, specializations,
  * military, etc.) comes from a second sheet - see LAND_BIO_SHEET_CSV_URL
  * below, which needs to be filled in with that sheet's own "Publish to
- * web" CSV link before that part goes live. Until then, the panel still
+ * web" CSV link before that part goes live. Until then, the popup still
  * works fine with just name/capital/claimed provinces from ClaimsStore.
  */
 (function(){
@@ -37,7 +40,8 @@
   const tooltip = document.getElementById('tooltip');
   const noDataBanner = document.getElementById('noDataBanner');
   const nationLegend = document.getElementById('nationLegend');
-  const globeStage = document.getElementById('globeViz');
+  const globeStage = document.getElementById('globeStage');
+  const globeSvg = document.getElementById('globeSvg');
   const flatStage = document.getElementById('flatStage');
   const flatSvg = document.getElementById('flatSvg');
   const nationCard = document.getElementById('nationCard');
@@ -68,14 +72,14 @@
   // Returns an ARRAY OF RINGS (one per M...Z subpath), not one flat point
   // list. Some province paths are archipelago-style - a mainland plus
   // several separate island subpaths in the same 'd' string (one province
-  // has as many as 30 'M' commands) - and earlier this function silently
-  // concatenated every subpath into a single ring. That drew a phantom
-  // straight edge from the end of one island to the start of the next,
-  // producing a huge, self-intersecting "bowtie" polygon spanning tens of
-  // degrees instead of the province's real, small footprint. On the flat
-  // map that's harmless (SVG just fills each subpath of the native 'd'
-  // independently), but for the globe every subpath needs to become its
-  // own polygon ring (a GeoJSON MultiPolygon), or the geometry is wrong.
+  // has as many as 30 'M' commands). Flattening every subpath into a
+  // single ring (an earlier bug here) draws a phantom straight edge from
+  // the end of one island to the start of the next, producing a huge,
+  // self-intersecting "bowtie" polygon spanning tens of degrees instead
+  // of the province's real, small footprint. On the flat map that's
+  // harmless (SVG just fills each subpath of the native 'd' independently),
+  // but for the globe every subpath needs to become its own polygon ring
+  // (a GeoJSON MultiPolygon), or the geometry is wrong.
   function getPathSubrings(d){
     const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|-?\d*\.?\d+(?:e-?\d+)?/g);
     if(!tokens) return [];
@@ -123,15 +127,12 @@
 
   // Ramer-Douglas-Peucker line simplification. Used ONLY for the globe's
   // polygon geometry, never for the flat map (which reuses the original
-  // 'd' path directly, at full detail, exactly like index.html).
-  //
-  // Why this exists: this world's 1200 provinces have ~105,000 boundary
-  // points between them (one province alone has 2849). That level of
-  // coastline detail is invisible at globe zoom, but three-globe still has
-  // to triangulate all of it into an extruded 3D solid (cap + side walls +
-  // stroke) for every polygon. Simplifying first cuts that to ~14,500
-  // points (~7x less) with no visible difference on a sphere, and is the
-  // main fix for the globe view being slow to load.
+  // 'd' path directly, at full detail, exactly like index.html). This
+  // world's 1200 provinces have ~105,000 boundary points between them
+  // (one province alone has 2849) - invisible detail at globe zoom, but
+  // it all still has to be re-projected and turned into an SVG path
+  // string on every drag frame. Simplifying first cuts that to ~14,500
+  // points (~7x less) with no visible difference on a sphere.
   function perpDist(pt, a, b){
     const dx = b[0]-a[0], dy = b[1]-a[1];
     const len2 = dx*dx + dy*dy;
@@ -162,10 +163,7 @@
 
   // A ring is only usable as a GeoJSON polygon ring if it has at least 4
   // points (3 distinct corners + the closing repeat) and every coordinate
-  // is a finite number. Guards against ever handing three-globe/earcut a
-  // degenerate or NaN ring, which is the kind of input most likely to
-  // break its triangulation in ways that are very hard to diagnose from
-  // outside a real browser.
+  // is a finite number.
   function isUsableRing(ring){
     if (!ring || ring.length < 4) return false;
     for (let i = 0; i < ring.length; i++){
@@ -183,9 +181,7 @@
   // "rings" holds one ring per subpath in the source 'd' (almost always
   // just one; archipelago-style provinces have several). "globeRings" is
   // the same, each independently simplified for the globe and filtered
-  // down to only the rings that are actually usable polygon geometry -
-  // this is what keeps a stray degenerate subpath in one province from
-  // ever reaching three-globe at all.
+  // down to only the rings that are actually usable polygon geometry.
   const baseProvinces = PROVINCES.map(function(p){
     const subpaths = getPathSubrings(p.d);
     const rings = subpaths.map(function(pts){
@@ -224,11 +220,11 @@
   // continents read as distinct landmasses even where nobody's claimed
   // anything yet. Claimed provinces always use their nation's full-color
   // instead of this.
+  //
   // Offset the starting hue away from 0: with the golden-angle spacing
   // alone, the very first continent in CONTINENTS always lands on hue 0,
   // which at this low saturation/high lightness renders as a visibly pink
-  // tone rather than a neutral one - easy to mistake for a rendering bug
-  // ("the globe is pink!") rather than what it actually is, a color choice.
+  // tone rather than a neutral one.
   const CONTINENT_HUE_OFFSET = 200;
   const continentTint = {};
   (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c, i){
@@ -244,39 +240,31 @@
   let landBioByName = {};    // NATIONNAME(upper) -> sheet row, once loaded
   let landBioConfigured = false;
   let landBioError = null;
-  let features = [];         // colored GeoJSON-ish features, rebuilt once claims resolve
+  let features = [];         // colored per-province info, rebuilt once claims resolve
 
   function buildFeatures(){
-    features = baseProvinces
-      // A province only ever loses ALL of its rings if every subpath in its
-      // source data was degenerate (see isUsableRing) - vanishingly rare,
-      // but such a province has no valid geometry to give the globe at all,
-      // so it's left out rather than passed through as broken input.
-      .filter(function(p){ return p.globeRings.length > 0; })
-      .map(function(p){
-        const claim = takenIndex[p.label.toUpperCase()] || null;
-        const nationName = claim ? claim.name : null;
-        const color = nationName ? (nationColor[nationName] || NEUTRAL_HEX) : tintForContinent(p.continent);
-        const isCapital = !!(claim && claim.capital && claim.capital.toUpperCase() === p.label.toUpperCase());
-        // Multiple usable rings (an archipelago-style province) -> a real
-        // GeoJSON MultiPolygon, one polygon per island/subpath. A single
-        // ring -> a plain Polygon. Either way every ring here is one
-        // complete, independent, closed loop - never several subpaths
-        // stitched together into one (that was the source of the huge,
-        // self-intersecting "bowtie" shapes some provinces used to render
-        // as on the globe).
-        const geometry = p.globeRings.length > 1
+    features = baseProvinces.map(function(p){
+      const claim = takenIndex[p.label.toUpperCase()] || null;
+      const nationName = claim ? claim.name : null;
+      const color = nationName ? (nationColor[nationName] || NEUTRAL_HEX) : tintForContinent(p.continent);
+      const isCapital = !!(claim && claim.capital && claim.capital.toUpperCase() === p.label.toUpperCase());
+      // Multiple usable rings (an archipelago-style province) -> a real
+      // GeoJSON MultiPolygon, one polygon per island/subpath, for the
+      // globe. A province with no usable ring at all (vanishingly rare -
+      // every subpath in its source data would have to be degenerate)
+      // gets geometry: null and is simply skipped when the globe is
+      // built; the flat map is unaffected either way, since it always
+      // draws straight from the native 'd' path regardless of this.
+      const geometry = !p.globeRings.length ? null
+        : p.globeRings.length > 1
           ? { type: 'MultiPolygon', coordinates: p.globeRings.map(function(r){ return [r]; }) }
           : { type: 'Polygon', coordinates: [ p.globeRings[0] ] };
-        return {
-          type: 'Feature',
-          properties: {
-            id: p.id, label: p.label, econ: p.econ, climate: p.climate,
-            nationName: nationName, isCapital: isCapital, color: color,
-          },
-          geometry: geometry,
-        };
-      });
+      return {
+        id: p.id, label: p.label, econ: p.econ, climate: p.climate,
+        nationName: nationName, isCapital: isCapital, color: color,
+        geometry: geometry,
+      };
+    });
   }
 
   // =========================================================================
@@ -367,7 +355,7 @@
       .then(function(csvText){
         const rows = csvText.split(/\r?\n/).map(parseCsvLine).filter(function(r){ return r.length > 1; });
         if (rows.length < 2){
-          console.warn('[Globe] Land Bio Data sheet loaded but had no data rows.');
+          console.warn('[Map] Land Bio Data sheet loaded but had no data rows.');
           return { rows: {}, configured: true, error: null };
         }
         const idx = buildHeaderIndex(rows[0]);
@@ -394,11 +382,11 @@
             expeditionary: get('expeditionary'), paramilitary: get('paramilitary'),
           };
         }
-        console.log('[Globe] Loaded land bio data for ' + Object.keys(byNation).length + ' nation(s).');
+        console.log('[Map] Loaded land bio data for ' + Object.keys(byNation).length + ' nation(s).');
         return { rows: byNation, configured: true, error: null };
       })
       .catch(function(e){
-        console.warn('[Globe] Could not load the Land Bio Data sheet:', e.message);
+        console.warn('[Map] Could not load the Land Bio Data sheet:', e.message);
         return { rows: {}, configured: true, error: e.message };
       });
   }
@@ -504,19 +492,15 @@
   }
 
   function applySelectionHighlight(){
-    // Flat map: toggle a class on every path belonging to the selected
-    // nation - cheap (just a CSS class swap on existing <path> elements,
-    // no geometry work).
+    // Cheap either way - just a CSS class swap on existing elements, no
+    // geometry work - so both views can be kept in sync on every
+    // selection instead of only the currently-visible one.
     Array.from(flatSvg.querySelectorAll('.nation-province')).forEach(function(el){
       el.classList.toggle('picked', !!selectedNationName && el.dataset.nation === selectedNationName);
     });
-    // Deliberately NOT re-highlighting on the globe itself: calling
-    // .polygonAltitude()/.polygonStrokeColor() again re-triangulates every
-    // polygon's 3D geometry (cap + side walls) for all 1200 provinces, not
-    // just the changed ones - with this dataset's ~14,500 (post-simplify)
-    // boundary points, that was the actual cause of "unresponsive" clicks.
-    // The info panel + flat-map highlight already show the selection;
-    // hovering a province still shows its own label/tooltip on the globe.
+    Array.from(globeSvg.querySelectorAll('.nation-province')).forEach(function(el){
+      el.classList.toggle('picked', !!selectedNationName && el.dataset.nation === selectedNationName);
+    });
   }
 
   // =========================================================================
@@ -542,112 +526,18 @@
     nationLegend.classList.add('show');
   }
 
-  // =========================================================================
-  // 6. Globe renderer (globe.gl)
-  // =========================================================================
-
-  let globeInstance = null;
-  let globeFailed = false;
-
-  // Safety net: three-globe rebuilds all 1200 polygon meshes on the next
-  // animation frame after .polygonsData() is set (that update is debounced,
-  // not synchronous), so a bad geometry can throw from inside a browser
-  // render callback we have no try/catch around. If that happens the globe
-  // silently stops rendering with no visible error, which is exactly the
-  // "blank/wrong-looking globe, no idea why" situation this page was stuck
-  // in before. This listener can't fix that crash, but it makes sure it's
-  // never silent again: it falls back to the flat map (which uses none of
-  // this rendering path and is known-good) and prints the real error text
-  // into the on-page banner so it can be read off and reported, instead of
-  // requiring the browser dev console.
-  window.addEventListener('error', function(e){
-    if (globeFailed) return;
-    if (globeStage.hidden) return; // only care while the globe is the active view
-    globeFailed = true;
-    showFlatView();
-    noDataBanner.textContent = 'The 3D globe hit a rendering error and has been switched to the flat map instead. Error: ' +
-      (e && e.message ? e.message : 'unknown error');
-    noDataBanner.classList.add('show');
-  });
-
-  function initGlobe(){
-    if (globeInstance || typeof Globe !== 'function') return;
-    globeInstance = Globe({ rendererConfig: { antialias: true, alpha: true } })(globeStage)
-      .backgroundColor('rgba(0,0,0,0)')
-      .showAtmosphere(true)
-      .atmosphereColor('#7fa8ff')
-      .atmosphereAltitude(0.2)
-      // Explicit rather than relying on globe.gl's default accessor: our
-      // data is a full GeoJSON Feature per province ({type, properties,
-      // geometry}), and if the library's own default ever reads the datum
-      // itself as the geometry (rather than datum.geometry), every one of
-      // our features has the WRONG top-level "type" (Feature, not
-      // Polygon), which fails geometry parsing for essentially all 1200
-      // provinces and could plausibly explain a single fallback shape
-      // covering the whole globe. Set before .polygonsData() so the very
-      // first bind already uses it, not just subsequent re-renders.
-      .polygonGeoJsonGeometry(function(f){ return f.geometry; })
-      .polygonsData(features)
-      .polygonCapColor(function(f){ return f.properties.color; })
-      .polygonSideColor(function(){ return 'rgba(20,20,20,0.2)'; })
-      // No per-province stroke here either - same reasoning as globe.css:
-      // same-nation neighbors share one fill color, so leaving the grid
-      // of province outlines off makes each nation read as one region.
-      // IMPORTANT: this must be a falsy value, not a "transparent" color
-      // string - three-globe checks `!!polygonStrokeColor(f)` to decide
-      // whether to build a stroke line at all, so a string like
-      // 'rgba(0,0,0,0)' is still truthy and was silently forcing it to
-      // build a whole extra stroke-line geometry (a second, independent
-      // triangulation-adjacent code path) for every one of the 1200
-      // polygons, just to render it invisibly. Passing null skips that
-      // work entirely instead of hiding it.
-      .polygonStrokeColor(function(){ return null; })
-      .polygonAltitude(function(f){ return f.properties.nationName ? 0.008 : 0.004; })
-      .polygonLabel(function(f){
-        return '<div style="font-family: sans-serif; padding:2px 4px;">' +
-          '<b>' + escapeHtml(f.properties.label) + '</b><br>' +
-          (f.properties.nationName ? escapeHtml(f.properties.nationName) : 'Unclaimed') + '</div>';
-      })
-      .onPolygonClick(function(f){ selectProvince(f.properties); })
-      .polygonsTransitionDuration(300);
-
-    // Plain colored ocean sphere - this is a fantasy world, not Earth, so no
-    // photographic globe texture is used.
-    try { globeInstance.globeMaterial().color.set(WATER); } catch(e){ /* non-fatal */ }
-
-    // Gentle idle spin, centered roughly over the landmass; stops on the
-    // first drag/interaction rather than fighting the user.
-    const avg = averageLonLat();
-    globeInstance.pointOfView({ lat: avg.lat, lng: avg.lon, altitude: 2.4 }, 0);
-    const controls = globeInstance.controls();
-    if (controls){
-      controls.autoRotate = true;
-      controls.autoRotateSpeed = 0.35;
-      const stopSpin = function(){ controls.autoRotate = false; };
-      globeStage.addEventListener('pointerdown', stopSpin, { once: true });
-      globeStage.addEventListener('wheel', stopSpin, { once: true });
-    }
-
-    resizeGlobe();
+  function showMapTooltip(e, props){
+    const rect = mapFrame.getBoundingClientRect();
+    const sub = props.nationName ? ('Claimed by ' + props.nationName) : 'Unclaimed';
+    tooltip.innerHTML = escapeHtml(props.label) + '<div class="sub">' + escapeHtml(sub) + '</div>';
+    tooltip.style.left = (e.clientX - rect.left) + 'px';
+    tooltip.style.top = (e.clientY - rect.top) + 'px';
+    tooltip.classList.add('show');
   }
-
-  function averageLonLat(){
-    let sLon = 0, sLat = 0, n = 0;
-    baseProvinces.forEach(function(p){
-      p.rings.forEach(function(ring){
-        ring.forEach(function(pt){ sLon += pt[0]; sLat += pt[1]; n++; });
-      });
-    });
-    return n ? { lon: sLon/n, lat: sLat/n } : { lon: 0, lat: 0 };
-  }
-
-  function resizeGlobe(){
-    if (!globeInstance) return;
-    globeInstance.width(globeStage.clientWidth).height(globeStage.clientHeight);
-  }
+  function hideTooltip(){ tooltip.classList.remove('show'); }
 
   // =========================================================================
-  // 7. Flat map renderer (native pixel space = already equirectangular)
+  // 6. Flat map renderer (native pixel space = already equirectangular)
   // =========================================================================
 
   const LAKE_LIST = (typeof LAKES !== 'undefined') ? LAKES : [];
@@ -670,8 +560,7 @@
     flatSvg.appendChild(gIslands);
 
     const gProvinces = document.createElementNS(NS, 'g');
-    features.forEach(function(f){
-      const props = f.properties;
+    features.forEach(function(props){
       const base = baseById[props.id];
       const el = document.createElementNS(NS, 'path');
       el.setAttribute('d', base.d);
@@ -680,7 +569,7 @@
       el.dataset.id = props.id;
       el.dataset.nation = props.nationName || '';
       el.addEventListener('click', function(){ selectProvince(props); });
-      el.addEventListener('mousemove', function(e){ showFlatTooltip(e, props); });
+      el.addEventListener('mousemove', function(e){ showMapTooltip(e, props); });
       el.addEventListener('mouseleave', hideTooltip);
       gProvinces.appendChild(el);
     });
@@ -696,16 +585,6 @@
     });
     flatSvg.appendChild(gLakes);
   }
-
-  function showFlatTooltip(e, props){
-    const rect = mapFrame.getBoundingClientRect();
-    const sub = props.nationName ? ('Claimed by ' + props.nationName) : 'Unclaimed';
-    tooltip.innerHTML = escapeHtml(props.label) + '<div class="sub">' + escapeHtml(sub) + '</div>';
-    tooltip.style.left = (e.clientX - rect.left) + 'px';
-    tooltip.style.top = (e.clientY - rect.top) + 'px';
-    tooltip.classList.add('show');
-  }
-  function hideTooltip(){ tooltip.classList.remove('show'); }
 
   // ---- Flat map zoom & pan (same pattern as map.js) ----
   const BASE_VB = VIEWBOX.split(' ').map(Number);
@@ -757,32 +636,189 @@
   if (zoomResetBtn) zoomResetBtn.addEventListener('click', resetView);
 
   // =========================================================================
+  // 7. Globe renderer (d3-geo orthographic projection)
+  //
+  // This is plain 2D SVG: d3.geoOrthographic() projects each lon/lat point
+  // onto a circle the way a photo of a real globe would look, d3.geoPath()
+  // turns a GeoJSON geometry into an SVG path string (correctly clipping
+  // anything on the far side of the sphere - that clipping is exactly
+  // what d3-geo is for and it's extremely well-tested), and dragging just
+  // changes the projection's .rotate() before re-computing those path
+  // strings. No 3D scene, no triangulation, no library that has to build
+  // an extruded solid mesh per province - which is what made the earlier
+  // three.js-based globe both slow and prone to silent rendering bugs.
+  // =========================================================================
+
+  const GLOBE_VB_SIZE = 800; // internal SVG coordinate space; scales via viewBox+CSS
+  let globeBuilt = false;
+  let globeReady = false; // false if d3 failed to load or init threw
+  let projection = null;
+  let pathGen = null;
+  let baseGlobeScale = GLOBE_VB_SIZE * 0.46;
+  let globeFeatures = []; // features that actually have usable geometry
+  const globeEls = {}; // id -> <path> element, kept across renders
+
+  function averageLonLat(){
+    let sLon = 0, sLat = 0, n = 0;
+    baseProvinces.forEach(function(p){
+      p.rings.forEach(function(ring){
+        ring.forEach(function(pt){ sLon += pt[0]; sLat += pt[1]; n++; });
+      });
+    });
+    return n ? { lon: sLon/n, lat: sLat/n } : { lon: 0, lat: 0 };
+  }
+
+  let renderScheduled = false;
+  function scheduleGlobeRender(){
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(function(){
+      renderScheduled = false;
+      renderGlobe();
+    });
+  }
+
+  function renderGlobe(){
+    if (!globeReady) return;
+    try {
+      globeSphereEl.setAttribute('d', pathGen({ type: 'Sphere' }) || '');
+      globeGraticuleEl.setAttribute('d', pathGen(d3.geoGraticule()()) || '');
+      globeFeatures.forEach(function(f){
+        const el = globeEls[f.id];
+        if (!el) return;
+        el.setAttribute('d', pathGen(f.geometry) || '');
+      });
+    } catch (e){
+      handleGlobeFailure(e);
+    }
+  }
+
+  let globeSphereEl, globeGraticuleEl, globeProvincesGroup;
+
+  function handleGlobeFailure(e){
+    if (!globeReady) return; // already handled
+    globeReady = false;
+    console.warn('[Map] Globe rendering failed, switching to the flat map:', e && e.message);
+    showFlatView();
+    noDataBanner.textContent = 'The globe view hit a rendering error and has been switched to the flat map instead. Error: ' +
+      (e && e.message ? e.message : 'unknown error');
+    noDataBanner.classList.add('show');
+  }
+
+  function buildGlobeView(){
+    if (globeBuilt) return;
+    globeBuilt = true;
+
+    if (typeof d3 === 'undefined' || !d3.geoOrthographic){
+      handleGlobeFailure(new Error('d3-geo did not load (check your connection / ad blocker)'));
+      return;
+    }
+
+    try {
+      globeSvg.setAttribute('viewBox', '0 0 ' + GLOBE_VB_SIZE + ' ' + GLOBE_VB_SIZE);
+      globeSvg.innerHTML = '';
+
+      const avg = averageLonLat();
+      projection = d3.geoOrthographic()
+        .scale(baseGlobeScale)
+        .translate([GLOBE_VB_SIZE / 2, GLOBE_VB_SIZE / 2])
+        .rotate([-avg.lon, -avg.lat])
+        .clipAngle(90)
+        .precision(0.3);
+      pathGen = d3.geoPath(projection);
+
+      globeSphereEl = document.createElementNS(NS, 'path');
+      globeSphereEl.setAttribute('class', 'globe-sphere');
+      globeSvg.appendChild(globeSphereEl);
+
+      globeGraticuleEl = document.createElementNS(NS, 'path');
+      globeGraticuleEl.setAttribute('class', 'globe-graticule');
+      globeSvg.appendChild(globeGraticuleEl);
+
+      globeProvincesGroup = document.createElementNS(NS, 'g');
+      globeFeatures = features.filter(function(f){ return !!f.geometry; });
+      globeFeatures.forEach(function(f){
+        const el = document.createElementNS(NS, 'path');
+        el.setAttribute('class', 'nation-province');
+        el.setAttribute('fill', f.color);
+        el.dataset.id = f.id;
+        el.dataset.nation = f.nationName || '';
+        el.addEventListener('click', function(){ if (!globeDragMoved) selectProvince(f); });
+        el.addEventListener('mousemove', function(e){ showMapTooltip(e, f); });
+        el.addEventListener('mouseleave', hideTooltip);
+        globeEls[f.id] = el;
+        globeProvincesGroup.appendChild(el);
+      });
+      globeSvg.appendChild(globeProvincesGroup);
+
+      globeReady = true;
+      renderGlobe();
+    } catch (e){
+      handleGlobeFailure(e);
+    }
+  }
+
+  // ---- Globe drag-to-rotate & scroll-to-zoom ----
+  let globeDragging = false, globeDragMoved = false, globeLastX = 0, globeLastY = 0;
+  const ROTATE_SENSITIVITY = 75; // matches the common d3 orthographic-drag convention
+
+  globeStage.addEventListener('mousedown', function(e){
+    if (!globeReady) return;
+    globeDragging = true; globeDragMoved = false;
+    globeLastX = e.clientX; globeLastY = e.clientY;
+    globeStage.classList.add('dragging');
+  });
+  window.addEventListener('mousemove', function(e){
+    if (!globeDragging || !globeReady) return;
+    const dx = e.clientX - globeLastX, dy = e.clientY - globeLastY;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) globeDragMoved = true;
+    if (!globeDragMoved) return;
+    const k = ROTATE_SENSITIVITY / projection.scale();
+    const r = projection.rotate();
+    let nextPhi = r[1] - dy * k;
+    nextPhi = Math.max(-90, Math.min(90, nextPhi));
+    projection.rotate([r[0] + dx * k, nextPhi]);
+    globeLastX = e.clientX; globeLastY = e.clientY;
+    hideTooltip();
+    scheduleGlobeRender();
+  });
+  window.addEventListener('mouseup', function(){
+    globeDragging = false;
+    globeStage.classList.remove('dragging');
+  });
+
+  globeStage.addEventListener('wheel', function(e){
+    if (!globeReady) return;
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1/1.15 : 1.15;
+    const next = Math.max(baseGlobeScale * 0.5, Math.min(baseGlobeScale * 5, projection.scale() * factor));
+    projection.scale(next);
+    scheduleGlobeRender();
+  }, { passive: false });
+
+  if (typeof ResizeObserver !== 'undefined'){
+    // The globe's own SVG scales purely via viewBox + CSS, so no JS
+    // resize handling is needed for it - only the flat map's zoom/pan
+    // math cares about the container's pixel size, and that's already
+    // read fresh on every zoom/pan interaction.
+  }
+
+  // =========================================================================
   // 8. Projection toggle
   // =========================================================================
 
   const projGlobeBtn = document.getElementById('projGlobeBtn');
   const projFlatBtn = document.getElementById('projFlatBtn');
+  let globeHasFailedOnce = false;
 
   function showGlobeView(){
-    if (globeFailed){
-      // Already fell back once this session (see the window 'error'
-      // listener above) - don't flip back into the broken view.
-      showFlatView();
-      return;
-    }
+    if (globeHasFailedOnce){ showFlatView(); return; }
     globeStage.hidden = false;
     flatStage.hidden = true;
     projGlobeBtn.classList.add('active');
     projFlatBtn.classList.remove('active');
-    try {
-      initGlobe();
-      resizeGlobe();
-    } catch (e){
-      globeFailed = true;
-      showFlatView();
-      noDataBanner.textContent = 'The 3D globe failed to load and has been switched to the flat map instead. Error: ' + e.message;
-      noDataBanner.classList.add('show');
-    }
+    buildGlobeView();
+    if (!globeReady) globeHasFailedOnce = true;
   }
   function showFlatView(){
     globeStage.hidden = true;
@@ -793,18 +829,12 @@
   projGlobeBtn.addEventListener('click', showGlobeView);
   projFlatBtn.addEventListener('click', showFlatView);
 
-  if (typeof ResizeObserver !== 'undefined'){
-    new ResizeObserver(function(){ resizeGlobe(); }).observe(globeStage);
-  } else {
-    window.addEventListener('resize', resizeGlobe);
-  }
-
   // =========================================================================
   // 9. Boot: load ownership + land bio data, then render both views
   // =========================================================================
 
   const claimsPromise = (window.ClaimsStore ? window.ClaimsStore.loadClaims() : Promise.resolve([]))
-    .catch(function(e){ console.warn('[Globe] Claims lookup failed:', e.message); return []; });
+    .catch(function(e){ console.warn('[Map] Claims lookup failed:', e.message); return []; });
 
   Promise.all([claimsPromise, fetchLandBioSheet()]).then(function(results){
     const claims = results[0];
@@ -834,8 +864,10 @@
       noDataBanner.classList.add('show');
     }
 
-    // Default view is the globe; render it once data is ready.
-    showGlobeView();
+    // Default view is the flat map - it has no third-party rendering
+    // dependency at all, so it's the safe first thing to show; the globe
+    // is one click away via the toggle above.
+    showFlatView();
   });
 
   applyViewBox();
