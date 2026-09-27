@@ -1183,6 +1183,27 @@
   }
 
   let globeSphereEl, globeGraticuleEl, globeProvincesGroup, globeLimbEl;
+  let globeZoomG = null;
+  let globeZoomFactor = 1;
+
+  // Zoom is a CSS/SVG transform on globeZoomG, NOT a bigger
+  // projection.scale(). It used to be projection.scale() directly (so
+  // "zoom" meant literally inflating every projected path's coordinate
+  // values) - that made zooming in on the relief appearance blow the
+  // terrain filter's raster region up along with it, and past some point
+  // (depends on the browser's own texture-size cap, which scales with the
+  // actual on-screen pixel size - so it took a wide window plus a fair
+  // amount of zoom to hit) the filter's output just got clipped to a hard
+  // rectangle instead of covering the whole sphere. Scaling a wrapping
+  // group post-render keeps every path's own coordinates - and so the
+  // filter's region - fixed to the sphere's un-zoomed size, no matter how
+  // far in the visitor zooms or how big their window is.
+  function applyGlobeZoom(){
+    if (!globeZoomG) return;
+    const c = GLOBE_VB_SIZE / 2;
+    globeZoomG.setAttribute('transform',
+      'translate(' + c + ',' + c + ') scale(' + globeZoomFactor + ') translate(' + (-c) + ',' + (-c) + ')');
+  }
   let globeLandEl = null, globeLandFeatures = [];
 
   // Separate from globeReady on purpose: globeReady starts out false and
@@ -1254,14 +1275,23 @@
       globeGraticuleEl = null;
       globeLimbEl = null;
 
+      // Everything actually drawn (as opposed to <defs>) goes inside this
+      // one group instead of straight onto globeSvg, so "zoom" (below) can
+      // be a CSS/SVG transform on this group rather than a bigger
+      // projection.scale(). See applyGlobeZoom() for why that distinction
+      // matters - it's not just style, it avoids a real rendering bug.
+      globeZoomG = svgEl('g', { id: 'globe-zoom-g' });
+      globeSvg.appendChild(globeZoomG);
+
       const landFeatures = features.filter(function(f){ return !!f.geometry; });
 
       if (mode === 'relief'){
-        buildGlobeReliefLayer(landFeatures);
+        buildGlobeReliefLayer(landFeatures, globeZoomG);
       } else {
-        buildGlobeClassicLayer(landFeatures);
+        buildGlobeClassicLayer(landFeatures, globeZoomG);
       }
 
+      applyGlobeZoom();
       globeReady = true;
       renderGlobe();
     } catch (e){
@@ -1270,7 +1300,7 @@
   }
 
   // ---- Relief appearance: the procedural satellite/terrain render ----
-  function buildGlobeReliefLayer(landFeatures){
+  function buildGlobeReliefLayer(landFeatures, container){
     const defs = svgEl('defs');
 
     // Deep, saturated satellite-photo ocean blue.
@@ -1388,25 +1418,59 @@
     // rule is declared later.
     globeSphereEl = svgEl('path', { class: 'globe-sphere' });
     globeSphereEl.style.fill = 'url(#globe-ocean)';
-    globeSvg.appendChild(globeSphereEl);
+    container.appendChild(globeSphereEl);
     // globeGraticuleEl left null - lat/lon lines don't read well over terrain
 
-    // Single continuous landmask: every province, claimed or not, drawn
-    // as ONE solid black silhouette (a mask only - all real color comes
-    // from the terrain filter applied to this <g>), clipped to the
-    // actual coastlines by the filter's final feComposite operator="in"
-    // against SourceGraphic.
+    // Single continuous landmask, drawn as ONE solid black silhouette (a
+    // mask only - all real color comes from the terrain filter applied to
+    // this <g>), clipped to the actual coastlines by the filter's final
+    // feComposite operator="in" against SourceGraphic.
     //
-    // This is one <path> whose 'd' is every province's ring data
-    // concatenated together (fill-rule nonzero unions them), NOT one
-    // <path> per province - a single path has no seams to begin with,
-    // there's only one edge, the true coastline.
-    globeLandFeatures = landFeatures;
+    // Built from the ALREADY-DISSOLVED continent/nation shapes
+    // (continentGlobeGeometryById / nationGlobeGeometryByName) - the same
+    // ones the border overlay and classic appearance use - NOT from each
+    // individual province's own f.geometry. Those are independently
+    // simplified per province (see mergeProvinceGeometry()'s comment
+    // above for why that's confirmed to leave two neighboring provinces'
+    // shared border not quite matching on both sides), so unioning ~1200
+    // of them let water show through at internal borders that should have
+    // been invisible. The dissolve step here cancels each shared internal
+    // border using the full-detail coordinates BEFORE any simplification,
+    // so what's left has no such gaps to begin with. A continent or
+    // nation whose dissolve itself failed falls back to its own
+    // provinces' individual (still gap-prone, but better than missing)
+    // geometry, same fallback used elsewhere in this file.
+    const landmaskFeatures = [];
+    const failedLandmaskContinents = {};
+    (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
+      if (continentGlobeGeometryById[c.id]){
+        landmaskFeatures.push({ id: 'continent:' + c.id, geometry: continentGlobeGeometryById[c.id] });
+      } else {
+        failedLandmaskContinents[c.id] = true;
+      }
+    });
+    landFeatures.filter(function(f){ return !f.nationName; }).forEach(function(f){
+      const base = baseById[f.id];
+      if (failedLandmaskContinents[base.continent]){
+        landmaskFeatures.push({ id: 'land:' + f.id, geometry: f.geometry });
+      }
+    });
+    Object.keys(claimsByName).forEach(function(nationName){
+      const geometry = nationGlobeGeometryByName[nationName];
+      if (geometry){
+        landmaskFeatures.push({ id: 'nation:' + nationName, geometry: geometry });
+      } else {
+        features.filter(function(f){ return f.nationName === nationName && !!f.geometry; }).forEach(function(f){
+          landmaskFeatures.push({ id: 'land:' + f.id, geometry: f.geometry });
+        });
+      }
+    });
+    globeLandFeatures = landmaskFeatures;
     const landMaskG = svgEl('g', { id: 'globe-landmask', filter: 'url(#globe-terrain)' });
     landMaskG.style.pointerEvents = 'none';
     globeLandEl = svgEl('path', { fill: '#000000', 'fill-rule': 'nonzero' });
     landMaskG.appendChild(globeLandEl);
-    globeSvg.appendChild(landMaskG);
+    container.appendChild(landMaskG);
 
     // Invisible click/hover targets on top of the terrain.
     //
@@ -1461,7 +1525,7 @@
         });
       }
     });
-    globeSvg.appendChild(hitboxG);
+    container.appendChild(hitboxG);
 
     // Ownership: a colored border traced around each nation's merged
     // territory (nationGlobeGeometryByName), drawn on top of the terrain,
@@ -1486,22 +1550,22 @@
       globeEls['border:' + nationName] = p;
       globeFeatures.push({ id: 'border:' + nationName, geometry: geometry });
     });
-    globeSvg.appendChild(borderG);
+    container.appendChild(borderG);
 
     globeLimbEl = svgEl('circle', { fill: 'url(#globe-limb)' });
     globeLimbEl.style.pointerEvents = 'none';
-    globeSvg.appendChild(globeLimbEl);
+    container.appendChild(globeLimbEl);
   }
 
   // ---- Classic appearance: flat per-nation/continent fill colors (the
   // globe's original look, still used for the Modern/Parchment/Dark
   // themes - only "Relief" gets the procedural terrain above) ----
-  function buildGlobeClassicLayer(landFeatures){
+  function buildGlobeClassicLayer(landFeatures, container){
     globeSphereEl = svgEl('path', { class: 'globe-sphere', fill: WATER });
-    globeSvg.appendChild(globeSphereEl);
+    container.appendChild(globeSphereEl);
 
     globeGraticuleEl = svgEl('path', { class: 'globe-graticule' });
-    globeSvg.appendChild(globeGraticuleEl);
+    container.appendChild(globeGraticuleEl);
 
     const globeProvincesGroup = svgEl('g');
 
@@ -1579,7 +1643,7 @@
       }
     });
 
-    globeSvg.appendChild(globeProvincesGroup);
+    container.appendChild(globeProvincesGroup);
   }
 
   // ---- Globe drag-to-rotate & scroll-to-zoom ----
@@ -1597,7 +1661,7 @@
     const dx = e.clientX - globeLastX, dy = e.clientY - globeLastY;
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) globeDragMoved = true;
     if (!globeDragMoved) return;
-    const k = ROTATE_SENSITIVITY / projection.scale();
+    const k = ROTATE_SENSITIVITY / (projection.scale() * globeZoomFactor);
     const r = projection.rotate();
     let nextPhi = r[1] - dy * k;
     nextPhi = Math.max(-90, Math.min(90, nextPhi));
@@ -1615,9 +1679,8 @@
     if (!globeReady) return;
     e.preventDefault();
     const factor = e.deltaY > 0 ? 1/1.15 : 1.15;
-    const next = Math.max(baseGlobeScale * 0.5, Math.min(baseGlobeScale * 5, projection.scale() * factor));
-    projection.scale(next);
-    scheduleGlobeRender();
+    globeZoomFactor = Math.max(0.5, Math.min(5, globeZoomFactor * factor));
+    applyGlobeZoom();
   }, { passive: false });
 
   if (typeof ResizeObserver !== 'undefined'){
