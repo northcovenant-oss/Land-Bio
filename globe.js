@@ -43,6 +43,18 @@
   const nationCard = document.getElementById('nationCard');
   const panelTitle = document.getElementById('panelTitle');
   const panelHint = document.getElementById('panelHint');
+  const infoPopup = document.getElementById('infoPopup');
+  const popupClose = document.getElementById('popupClose');
+
+  function showPopup(){ if (infoPopup) infoPopup.hidden = false; }
+  function hidePopup(){ if (infoPopup) infoPopup.hidden = true; }
+  if (popupClose){
+    popupClose.addEventListener('click', function(){
+      hidePopup();
+      selectedNationName = null;
+      applySelectionHighlight();
+    });
+  }
 
   if (mapFrame) mapFrame.style.background = WATER;
 
@@ -354,6 +366,7 @@
     if (p.climate) html += '<br>Climate: ' + escapeHtml(p.climate);
     html += '</div>';
     nationCard.innerHTML = html;
+    showPopup();
   }
 
   function renderNationPanel(nationName){
@@ -412,6 +425,7 @@
     }
 
     nationCard.innerHTML = html;
+    showPopup();
   }
 
   let selectedNationName = null;
@@ -479,6 +493,16 @@
       .showAtmosphere(true)
       .atmosphereColor('#7fa8ff')
       .atmosphereAltitude(0.2)
+      // Explicit rather than relying on globe.gl's default accessor: our
+      // data is a full GeoJSON Feature per province ({type, properties,
+      // geometry}), and if the library's own default ever reads the datum
+      // itself as the geometry (rather than datum.geometry), every one of
+      // our features has the WRONG top-level "type" (Feature, not
+      // Polygon), which fails geometry parsing for essentially all 1200
+      // provinces and could plausibly explain a single fallback shape
+      // covering the whole globe. Set before .polygonsData() so the very
+      // first bind already uses it, not just subsequent re-renders.
+      .polygonGeoJsonGeometry(function(f){ return f.geometry; })
       .polygonsData(features)
       .polygonCapColor(function(f){ return f.properties.color; })
       .polygonSideColor(function(){ return 'rgba(20,20,20,0.2)'; })

@@ -61,15 +61,13 @@
       </div>
 
       <div class="tooltip" id="tooltip"></div>
-    </div>
-  </div>
 
-  <div class="panel">
-    <h2 id="panelTitle">Nation Info</h2>
-    <p class="desc" id="panelHint">Click any province, on the globe or the flat map, to see who claims it and what's known about that nation.</p>
-
-    <div class="nation-card" id="nationCard">
-      <div class="empty-state" id="nationEmptyState">No province selected yet.</div>
+      <div class="info-popup" id="infoPopup" hidden>
+        <button class="popup-close" id="popupClose" title="Close" aria-label="Close">&times;</button>
+        <h2 id="panelTitle">Nation Info</h2>
+        <p class="desc" id="panelHint"></p>
+        <div class="nation-card" id="nationCard"></div>
+      </div>
     </div>
   </div>
 </div>
