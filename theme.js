@@ -1,11 +1,11 @@
 /*
  * THEME SWITCHER
  * --------------
- * Handles the "Appearance" section in the side panel: three selectable
- * styles (parchment / modern / dark), applied as a class on <body> and
+ * Handles the "Appearance" section in the side panel: selectable styles
+ * (parchment / modern / relief / dark), applied as a class on <body> and
  * persisted in localStorage so the choice sticks between visits.
  *
- * To add a 4th theme: give it a name, define a `body.theme-<name>` block
+ * To add another theme: give it a name, define a `body.theme-<name>` block
  * in style.css with the same custom properties as the existing themes,
  * and add a matching <button class="theme-option" data-theme="<name>">
  * in index.html's #setupOptions.
@@ -44,7 +44,7 @@
   }
 
   function applyTheme(theme){
-    document.body.classList.remove('theme-parchment', 'theme-modern', 'theme-dark');
+    document.body.classList.remove('theme-parchment', 'theme-modern', 'theme-dark', 'theme-relief');
     if (theme !== 'parchment') {
       document.body.classList.add('theme-' + theme);
     }
@@ -55,6 +55,11 @@
     // "Provinces" layer fill) pick up the new theme's colors immediately.
     if (typeof window.refreshMapTheme === 'function') {
       window.refreshMapTheme();
+    }
+    // globe.js exposes this the same way - only globe.html has it, and
+    // only "Relief" actually needs a rebuild there (see its comment).
+    if (typeof window.refreshGlobeTheme === 'function') {
+      window.refreshGlobeTheme();
     }
   }
 

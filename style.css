@@ -42,6 +42,25 @@ body.theme-modern{
   --panel-bg: #ffffff;
 }
 
+/* Relief reuses Modern's site chrome (panels/text/buttons) - the terrain
+   look itself lives entirely in globe.js's own SVG gradients/filters, not
+   in these variables, so there's nothing terrain-specific to define here. */
+body.theme-relief{
+  --parchment: #eef2f6;
+  --parchment-dark: #4a90d9;
+  --ink: #1c2530;
+  --ink-soft: #51617a;
+  --gold: #2f6fed;
+  --gold-bright: #4d8bff;
+  --seal-red: #e0473e;
+  --water: #3f8fd1;
+  --neutral-fill: #ffffff;
+  --font-display: 'Poppins', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --line: rgba(28,37,48,0.15);
+  --panel-bg: #ffffff;
+}
+
 body.theme-dark{
   --parchment: #1b1e26;
   --parchment-dark: #12141a;
@@ -488,6 +507,7 @@ path.extra-island{
 }
 .swatch-parchment{ background: linear-gradient(135deg, #ece0c2 50%, #78b464 50%); }
 .swatch-modern{ background: linear-gradient(135deg, #4a90d9 50%, #ffffff 50%); }
+.swatch-relief{ background: linear-gradient(135deg, #2f7fae 45%, #8aa66a 45% 75%, #d8d8d2 75%); }
 .swatch-dark{ background: linear-gradient(135deg, #12141a 50%, #2e323c 50%); }
 .theme-name{
   font-family: var(--font-body);

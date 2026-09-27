@@ -12,8 +12,8 @@
 <div class="app">
   <div class="site-controls">
     <div class="projection-toggle" id="projectionToggle" role="group" aria-label="Map projection">
-      <button class="projection-btn active" id="projFlatBtn" data-projection="flat">&#128506;&#65039; Flat Map</button>
-      <button class="projection-btn" id="projGlobeBtn" data-projection="globe">&#127760; Globe</button>
+      <button class="projection-btn" id="projFlatBtn" data-projection="flat">&#128506;&#65039; Flat Map</button>
+      <button class="projection-btn active" id="projGlobeBtn" data-projection="globe">&#127760; Globe</button>
     </div>
 
     <div class="theme-dropdown" id="themeDropdown">
@@ -26,6 +26,10 @@
         <button class="theme-option" data-theme="modern">
           <span class="theme-swatch swatch-modern"></span>
           <span class="theme-name">Modern<br><small>White continents, blue ocean</small></span>
+        </button>
+        <button class="theme-option" data-theme="relief">
+          <span class="theme-swatch swatch-relief"></span>
+          <span class="theme-name">Relief<br><small>Satellite terrain globe</small></span>
         </button>
         <button class="theme-option" data-theme="parchment">
           <span class="theme-swatch swatch-parchment"></span>
@@ -49,7 +53,7 @@
       <div class="no-data-banner" id="noDataBanner"></div>
       <div class="legend nation-legend" id="nationLegend"></div>
 
-      <div class="flat-stage" id="flatStage">
+      <div class="flat-stage" id="flatStage" hidden>
         <div class="zoom-controls" id="zoomControls">
           <button class="zoom-btn" id="zoomIn" title="Zoom in">&#43;</button>
           <button class="zoom-btn" id="zoomOut" title="Zoom out">&#8722;</button>
@@ -58,7 +62,7 @@
         <svg id="flatSvg" xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
 
-      <div class="globe-stage" id="globeStage" hidden>
+      <div class="globe-stage" id="globeStage">
         <svg id="globeSvg" xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
 
