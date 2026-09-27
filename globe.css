@@ -1,0 +1,153 @@
+/*
+ * GLOBE / FLAT-MAP PAGE STYLES
+ * ----------------------------
+ * Extra styles specific to globe.html, layered on top of the shared
+ * variables and base layout (.app, .map-wrap, .map-frame, .panel, .legend,
+ * .tooltip, .zoom-controls, .theme-dropdown, etc.) already defined in
+ * style.css. Only what's new or different from the claim map lives here.
+ */
+
+/* ---------- Projection toggle (Globe / Flat Map) ---------- */
+.projection-toggle{
+  display:flex;
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px;
+  gap: 3px;
+}
+.projection-btn{
+  font-family: var(--font-body);
+  font-size: 13px;
+  padding: 7px 13px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.projection-btn:hover{ color: var(--ink); background: rgba(0,0,0,0.05); }
+.projection-btn.active{ background: var(--gold); color: #fff; }
+
+/* ---------- Globe stage ---------- */
+.globe-frame{
+  overflow: hidden;
+}
+.globe-stage{
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 40%, #1c2a3d 0%, #0a0f18 75%);
+}
+.globe-stage canvas{ display:block; }
+.globe-stage .scene-tooltip{
+  font-family: var(--font-body);
+}
+
+/* ---------- Flat map stage (reuses .map-frame svg sizing from style.css) ---------- */
+.flat-stage{
+  position: absolute;
+  inset: 0;
+}
+.flat-stage[hidden]{ display:none; }
+.globe-stage[hidden]{ display:none; }
+#flatSvg{
+  width:100%;
+  height:100%;
+  display:block;
+  touch-action: none;
+}
+
+path.nation-province{
+  cursor: pointer;
+  stroke: var(--ink);
+  stroke-width: 0.6;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+path.nation-province:hover{ filter: brightness(1.12); }
+path.nation-province.picked{ filter: brightness(1.2); stroke: var(--gold-bright); stroke-width: 1.6; }
+
+/* ---------- Nation info panel ---------- */
+.nation-card{ flex:1 1 auto; overflow-y:auto; }
+
+.nation-card .nc-name{
+  font-family: var(--font-display);
+  font-size: 21px;
+  color: var(--ink);
+  margin: 0 0 2px;
+}
+.nation-card .nc-sub{
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--ink-soft);
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.nation-card .nc-field{
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0 0 9px;
+}
+.nation-card .nc-field-label{
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-right: 4px;
+}
+.nation-card .nc-field-value{ font-weight: 600; }
+.nation-card .nc-section{
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 18px 0 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.nation-card .nc-section:first-of-type{ margin-top: 0; padding-top:0; border-top:none; }
+.nation-card .nc-provinces{
+  display:flex;
+  flex-wrap:wrap;
+  gap:5px;
+  margin-top:4px;
+}
+.nation-card .nc-province-chip{
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(0,0,0,0.05);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.nation-card .nc-province-chip.capital{
+  background: var(--gold);
+  color: #fff;
+  border-color: var(--gold);
+  font-weight: 600;
+}
+.nation-card .nc-unclaimed{
+  font-style: italic;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.nation-card .nc-sheet-missing{
+  margin-top: 14px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--ink-soft);
+  background: rgba(0,0,0,0.03);
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+}
+
+.nation-legend .legend-swatch{ border-radius: 50%; }
+
+@media (max-width: 760px){
+  .projection-btn{ padding:6px 10px; font-size:12px; }
+}

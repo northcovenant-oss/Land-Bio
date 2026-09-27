@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Nations of Rylet</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="globe.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="site-controls">
+    <div class="projection-toggle" id="projectionToggle" role="group" aria-label="Map projection">
+      <button class="projection-btn active" id="projGlobeBtn" data-projection="globe">&#127760; Globe</button>
+      <button class="projection-btn" id="projFlatBtn" data-projection="flat">&#128506;&#65039; Flat Map</button>
+    </div>
+
+    <div class="theme-dropdown" id="themeDropdown">
+      <button class="theme-dropdown-toggle" id="setupToggle" aria-expanded="false">
+        <span class="theme-toggle-icon">&#9679;&#9679;&#9679;</span>
+        <span>Appearance</span>
+        <span class="chevron" id="setupChevron">&#9662;</span>
+      </button>
+      <div class="theme-dropdown-panel" id="setupOptions" hidden>
+        <button class="theme-option" data-theme="modern">
+          <span class="theme-swatch swatch-modern"></span>
+          <span class="theme-name">Modern<br><small>White continents, blue ocean</small></span>
+        </button>
+        <button class="theme-option" data-theme="parchment">
+          <span class="theme-swatch swatch-parchment"></span>
+          <span class="theme-name">Parchment<br><small>Classic map style</small></span>
+        </button>
+        <button class="theme-option" data-theme="dark">
+          <span class="theme-swatch swatch-dark"></span>
+          <span class="theme-name">Dark Mode<br><small>Low-light friendly</small></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="map-wrap">
+    <div class="map-frame globe-frame" id="mapFrame">
+      <div class="title-block">
+        <h1>Nations of Rylet</h1>
+        <p>Explore claimed territory &mdash; click a province to see who holds it</p>
+      </div>
+
+      <div class="no-data-banner" id="noDataBanner"></div>
+      <div class="legend nation-legend" id="nationLegend"></div>
+
+      <div class="globe-stage" id="globeViz"></div>
+
+      <div class="flat-stage" id="flatStage" hidden>
+        <div class="zoom-controls" id="zoomControls">
+          <button class="zoom-btn" id="zoomIn" title="Zoom in">&#43;</button>
+          <button class="zoom-btn" id="zoomOut" title="Zoom out">&#8722;</button>
+          <button class="zoom-btn zoom-reset" id="zoomReset" title="Reset view">&#8635;</button>
+        </div>
+        <svg id="flatSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 id="panelTitle">Nation Info</h2>
+    <p class="desc" id="panelHint">Click any province, on the globe or the flat map, to see who claims it and what's known about that nation.</p>
+
+    <div class="nation-card" id="nationCard">
+      <div class="empty-state" id="nationEmptyState">No province selected yet.</div>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="claims.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/globe.gl@2"></script>
+<script src="globe.js"></script>
+<script src="theme.js"></script>
+</body>
+</html>
