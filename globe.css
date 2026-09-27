@@ -58,13 +58,21 @@
   touch-action: none;
 }
 
+/*
+ * No per-province stroke by default: adjacent provinces belonging to the
+ * same nation already share one solid fill color, so leaving the outline
+ * off makes them read as a single claimed region instead of a patchwork
+ * of tiny province cells - "show nations, not provinces" without needing
+ * to actually merge 1200 polygons into one shape. A color/stroke still
+ * appears at real boundaries: between two different nations (different
+ * fill colors) or between claimed and unclaimed land.
+ */
 path.nation-province{
   cursor: pointer;
-  stroke: var(--ink);
-  stroke-width: 0.6;
+  stroke: none;
   transition: filter 0.15s ease, opacity 0.15s ease;
 }
-path.nation-province:hover{ filter: brightness(1.12); }
+path.nation-province:hover{ filter: brightness(1.15); }
 path.nation-province.picked{ filter: brightness(1.2); stroke: var(--gold-bright); stroke-width: 1.6; }
 
 /* ---------- Nation info panel ---------- */

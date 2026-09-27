@@ -167,6 +167,19 @@
     return 'hsl(' + hue.toFixed(1) + ', 60%, 45%)';
   }
 
+  // Unclaimed land gets a subtle per-continent tint (same hue-spacing
+  // trick, just muted) rather than one flat neutral color everywhere, so
+  // continents read as distinct landmasses even where nobody's claimed
+  // anything yet. Claimed provinces always use their nation's full-color
+  // instead of this.
+  const continentTint = {};
+  (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c, i){
+    continentTint[c.id] = 'hsl(' + ((i * GOLDEN_ANGLE) % 360).toFixed(1) + ', 22%, 68%)';
+  });
+  function tintForContinent(continentId){
+    return continentTint[continentId] || NEUTRAL_HEX;
+  }
+
   let takenIndex = {};       // provinceLabel(upper) -> claim record
   let claimsByName = {};     // nationName -> claim record
   let nationColor = {};      // nationName -> color string
@@ -179,7 +192,7 @@
     features = baseProvinces.map(function(p){
       const claim = takenIndex[p.label.toUpperCase()] || null;
       const nationName = claim ? claim.name : null;
-      const color = nationName ? (nationColor[nationName] || NEUTRAL_HEX) : NEUTRAL_HEX;
+      const color = nationName ? (nationColor[nationName] || NEUTRAL_HEX) : tintForContinent(p.continent);
       const isCapital = !!(claim && claim.capital && claim.capital.toUpperCase() === p.label.toUpperCase());
       return {
         type: 'Feature',
@@ -468,8 +481,11 @@
       .atmosphereAltitude(0.2)
       .polygonsData(features)
       .polygonCapColor(function(f){ return f.properties.color; })
-      .polygonSideColor(function(){ return 'rgba(20,20,20,0.35)'; })
-      .polygonStrokeColor(function(){ return 'rgba(20,20,20,0.55)'; })
+      .polygonSideColor(function(){ return 'rgba(20,20,20,0.2)'; })
+      // No per-province stroke here either - same reasoning as globe.css:
+      // same-nation neighbors share one fill color, so leaving the grid
+      // of province outlines off makes each nation read as one region.
+      .polygonStrokeColor(function(){ return 'rgba(0,0,0,0)'; })
       .polygonAltitude(function(f){ return f.properties.nationName ? 0.008 : 0.004; })
       .polygonLabel(function(f){
         return '<div style="font-family: sans-serif; padding:2px 4px;">' +
@@ -528,9 +544,9 @@
       const el = document.createElementNS(NS, 'path');
       el.setAttribute('d', isl.d);
       if (isl.transform) el.setAttribute('transform', isl.transform);
-      el.setAttribute('fill', NEUTRAL_HEX);
+      el.setAttribute('fill', tintForContinent(isl.continent));
       el.style.pointerEvents = 'none';
-      el.style.opacity = '0.55';
+      el.style.opacity = '0.85';
       gIslands.appendChild(el);
     });
     flatSvg.appendChild(gIslands);
