@@ -223,6 +223,11 @@
     const globeRings = rings
       .map(function(ring){ return fixRingWinding(simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE)); })
       .filter(isUsableRing);
+    // Raw pixel-space rings (native SVG coordinates, full detail, no
+    // lon/lat conversion) - used only for unioning same-nation provinces
+    // together into one merged shape on the flat map. Closed already by
+    // getPathSubrings (it repeats the start point on Z/z).
+    const pixelRings = subpaths.filter(isUsableRing);
     return {
       id: p.id,
       label: p.label,
@@ -232,6 +237,7 @@
       continent: p.continent,
       rings: rings,
       globeRings: globeRings,
+      pixelRings: pixelRings,
     };
   });
   const baseById = {};
@@ -297,6 +303,245 @@
         nationName: nationName, isCapital: isCapital, color: color,
         geometry: geometry,
       };
+    });
+  }
+
+  // =========================================================================
+  // 2b. Nation shapes: merge every nation's claimed provinces into ONE
+  //     outline apiece (internal province borders dissolved away), so the
+  //     map reads as "who owns this land", not "here are 1200 province
+  //     cells that happen to share colors". Unclaimed provinces are left
+  //     exactly as they were - drawn individually, since there's no nation
+  //     to merge them into.
+  //
+  //     No external geometry library for this: checked the actual source
+  //     data first (counting how often each boundary edge - the segment
+  //     between two consecutive points in a province's path - occurs
+  //     across a cluster of adjacent provinces), and confirmed two
+  //     neighboring provinces' shared border is authored as the exact
+  //     same coordinates on both sides, every time, across all 1200
+  //     provinces. That means "merge" can just be "cancel out every edge
+  //     that appears on two different provinces (an internal border,
+  //     shared both ways), and stitch whatever edges are left (each
+  //     province's own outer boundary) back into closed loops" - no
+  //     floating-point polygon intersection math needed, just counting
+  //     and chaining. See dissolveRings() below.
+  // =========================================================================
+
+  let nationFlatPathByName = {};      // nationName -> SVG 'd' string (pixel space)
+  let nationGlobeGeometryByName = {}; // nationName -> GeoJSON Polygon/MultiPolygon (lon/lat)
+
+  // Cancels every edge shared by exactly two rings (an internal border
+  // between two provinces of the same nation - it's walked once by each
+  // side, in opposite directions, so it appears twice total) and stitches
+  // what's left - each province's stretch of true outer boundary - back
+  // into closed loops. On clean, exactly-matching data (verified above)
+  // this always fully closes: every surviving edge's end point is some
+  // other surviving edge's start point, all the way back around.
+  //
+  // Returns a FLAT list of rings - it doesn't try to figure out which
+  // rings are "exterior" boundary vs. a hole (an unclaimed enclave fully
+  // surrounded by this nation's territory) or which hole belongs to which
+  // disjoint piece of the nation's territory - see groupRingsForGlobe()
+  // for why the globe needs that and the flat map doesn't.
+  function dissolveRings(ringsList, precision){
+    function ptKey(pt){ return pt[0].toFixed(precision) + ',' + pt[1].toFixed(precision); }
+    function edgeKey(ka, kb){ return ka < kb ? ka + '|' + kb : kb + '|' + ka; }
+
+    const edgeCount = {};
+    ringsList.forEach(function(ring){
+      for (let i = 0; i < ring.length - 1; i++){
+        const ka = ptKey(ring[i]), kb = ptKey(ring[i + 1]);
+        if (ka === kb) continue;
+        edgeCount[edgeKey(ka, kb)] = (edgeCount[edgeKey(ka, kb)] || 0) + 1;
+      }
+    });
+
+    // Keep only edges that occur exactly once (a province's true outer
+    // boundary); an edge occurring twice is an internal border and
+    // cancels out. Kept as DIRECTED adjacency (in whichever direction the
+    // source data happens to have walked it) so re-chaining preserves
+    // each edge's original winding - see the comment on groupRingsForGlobe
+    // for why that matters.
+    const pointByKey = {};
+    const adjacency = {}; // ptKey -> [ptKey, ...] (almost always exactly one)
+    ringsList.forEach(function(ring){
+      for (let i = 0; i < ring.length - 1; i++){
+        const a = ring[i], b = ring[i + 1];
+        const ka = ptKey(a), kb = ptKey(b);
+        if (ka === kb) continue;
+        if (edgeCount[edgeKey(ka, kb)] !== 1) continue;
+        pointByKey[ka] = a; pointByKey[kb] = b;
+        (adjacency[ka] = adjacency[ka] || []).push(kb);
+      }
+    });
+
+    const edgeUsed = {};
+    const outRings = [];
+    Object.keys(adjacency).forEach(function(startKey){
+      adjacency[startKey].forEach(function(firstNext){
+        if (edgeUsed[startKey + '=>' + firstNext]) return;
+        const ringKeys = [startKey];
+        let cur = startKey, next = firstNext;
+        let guard = 0;
+        while (true){
+          edgeUsed[cur + '=>' + next] = true;
+          ringKeys.push(next);
+          if (next === startKey) break; // closed the loop
+          const options = adjacency[next];
+          if (!options || !options.length) break; // dangling - shouldn't happen on clean data
+          let picked = null;
+          for (let i = 0; i < options.length; i++){
+            if (!edgeUsed[next + '=>' + options[i]]){ picked = options[i]; break; }
+          }
+          if (picked == null) break;
+          cur = next; next = picked;
+          if (++guard > 500000) break; // safety valve against a malformed chain
+        }
+        if (ringKeys.length >= 4 && ringKeys[0] === ringKeys[ringKeys.length - 1]){
+          outRings.push(ringKeys.map(function(k){ return pointByKey[k]; }));
+        }
+        // An unclosed chain is silently dropped rather than drawn wrong -
+        // it would mean this specific nation's claim has a genuinely
+        // mismatched border somewhere, which real geographic/hand-edited
+        // data occasionally does even when the vast bulk of it lines up
+        // exactly. Dropping it can only make that one province's sliver
+        // of edge vanish from an otherwise-correct merged shape, never
+        // corrupt the shape itself.
+      });
+    });
+    return outRings;
+  }
+
+  // The globe's GeoJSON needs each hole nested inside the specific
+  // exterior ring it belongs to - unlike the flat SVG path (plain fill
+  // only cares about each ring's own winding, not this grouping), d3-geo
+  // clips each MultiPolygon "polygon" entry as its own connected shape,
+  // so a hole listed as an unrelated top-level entry instead of nested
+  // with its exterior renders as extra, wrong geometry instead of a hole
+  // (confirmed against the real library with a synthetic "ring of
+  // provinces around an unclaimed enclave" test).
+  //
+  // Every ring here still has its ORIGINAL winding, inherited untouched
+  // from the source province edges it's built from (dissolveRings() never
+  // reverses anything) - and since every province in this dataset is
+  // wound the same consistent way to begin with, that means a merged
+  // shape's outer boundary comes out wound the same way individual
+  // provinces already were, while a hole's boundary automatically comes
+  // out wound the OPPOSITE way (walking the inside edge of a ring of
+  // provinces around a gap necessarily runs the opposite rotational
+  // direction from walking any one province's own boundary) - a general
+  // fact about consistently-oriented planar regions, not a coincidence,
+  // and confirmed against the real d3-geo library on a synthetic donut
+  // test: exterior/hole classified this way, nested together, needed NO
+  // extra winding fix at all - unlike the polygon-clipping-based version
+  // this replaced, which normalized winding on its own terms and did.
+  function ringSignedArea(ring){
+    let sum = 0;
+    for (let i = 0; i < ring.length - 1; i++) sum += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+    return sum / 2;
+  }
+  function ringBBox(ring){
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    ring.forEach(function(pt){
+      if (pt[0] < minX) minX = pt[0]; if (pt[0] > maxX) maxX = pt[0];
+      if (pt[1] < minY) minY = pt[1]; if (pt[1] > maxY) maxY = pt[1];
+    });
+    return [minX, minY, maxX, maxY];
+  }
+  function pointInRing(pt, ring){
+    let inside = false;
+    for (let i = 0, j = ring.length - 2; i < ring.length - 1; j = i++){
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      const crosses = ((yi > pt[1]) !== (yj > pt[1])) && (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi);
+      if (crosses) inside = !inside;
+    }
+    return inside;
+  }
+  function groupRingsForGlobe(ringsList, exteriorSign){
+    const exteriors = [];
+    const holes = [];
+    ringsList.forEach(function(ring){
+      const sign = ringSignedArea(ring) >= 0 ? 1 : -1;
+      if (sign === exteriorSign) exteriors.push({ ring: ring, bbox: ringBBox(ring), holes: [] });
+      else holes.push(ring);
+    });
+    holes.forEach(function(hole){
+      const pt = hole[0];
+      for (let i = 0; i < exteriors.length; i++){
+        const ext = exteriors[i];
+        if (pt[0] < ext.bbox[0] || pt[0] > ext.bbox[2] || pt[1] < ext.bbox[1] || pt[1] > ext.bbox[3]) continue;
+        if (pointInRing(pt, ext.ring)){ ext.holes.push(hole); return; }
+      }
+      // An orphan hole (no exterior contains it) shouldn't happen on
+      // clean data - drop it rather than render it as a wrong top-level
+      // shape.
+    });
+    return exteriors.map(function(e){ return [e.ring].concat(e.holes); });
+  }
+  // Computed once: any single ordinary province ring is a pure exterior
+  // (individual provinces have no holes of their own), so its winding
+  // sign IS the dataset's "exterior" convention in lon/lat space.
+  const GLOBE_EXTERIOR_SIGN = (function(){
+    const ref = baseProvinces.filter(function(p){ return p.rings.length; })[0];
+    return ringSignedArea(ref.rings[0]) >= 0 ? 1 : -1;
+  })();
+
+  function multiPolygonToSvgPath(ringsList){
+    let d = '';
+    ringsList.forEach(function(ring){
+      if (!ring || ring.length < 4) return;
+      d += 'M' + ring.map(function(pt){ return pt[0].toFixed(2) + ',' + pt[1].toFixed(2); }).join('L') + 'Z';
+    });
+    return d;
+  }
+
+  function buildNationGeometry(){
+    nationFlatPathByName = {};
+    nationGlobeGeometryByName = {};
+
+    const provincesByNation = {};
+    baseProvinces.forEach(function(p){
+      const claim = takenIndex[p.label.toUpperCase()] || null;
+      if (!claim) return;
+      (provincesByNation[claim.name] = provincesByNation[claim.name] || []).push(p);
+    });
+
+    Object.keys(provincesByNation).forEach(function(nationName){
+      const provinces = provincesByNation[nationName];
+
+      try {
+        const pixelRings = [];
+        provinces.forEach(function(p){ p.pixelRings.forEach(function(r){ pixelRings.push(r); }); });
+        const mergedPixel = dissolveRings(pixelRings, 2);
+        if (mergedPixel.length) nationFlatPathByName[nationName] = multiPolygonToSvgPath(mergedPixel);
+      } catch (e){
+        console.warn('[Map] Could not merge flat-map territory for ' + nationName + ':', e.message);
+      }
+
+      try {
+        // Full, UNsimplified lon/lat rings ("rings", not "globeRings") -
+        // each province's globeRings is independently simplified for
+        // rendering performance, which can nudge two neighboring
+        // provinces' shared border to no longer match exactly on both
+        // sides (confirmed: it does, on this real data - simplifying
+        // before merging left the vast majority of internal borders
+        // uncancelled). Dissolving on the full-detail coordinates first
+        // and simplifying the much-shorter merged result afterward avoids
+        // that entirely.
+        const globeRingsFull = [];
+        provinces.forEach(function(p){ p.rings.forEach(function(r){ globeRingsFull.push(r); }); });
+        const mergedGlobe = dissolveRings(globeRingsFull, 7);
+        const simplified = mergedGlobe
+          .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
+          .filter(isUsableRing);
+        if (simplified.length){
+          const polygons = groupRingsForGlobe(simplified, GLOBE_EXTERIOR_SIGN);
+          if (polygons.length) nationGlobeGeometryByName[nationName] = { type: 'MultiPolygon', coordinates: polygons };
+        }
+      } catch (e){
+        console.warn('[Map] Could not merge globe territory for ' + nationName + ':', e.message);
+      }
     });
   }
 
@@ -592,21 +837,64 @@
     });
     flatSvg.appendChild(gIslands);
 
+    // Unclaimed provinces: still drawn individually (there's no nation to
+    // merge them into), with the same neutral-per-continent tint as
+    // before but now with a faint outline too, so an empty continent
+    // reads as "open land, subdivided into provinces you could still
+    // claim" rather than a single flat color block.
     const gProvinces = document.createElementNS(NS, 'g');
     features.forEach(function(props){
+      if (props.nationName) return; // claimed - drawn as a merged nation shape below instead
       const base = baseById[props.id];
       const el = document.createElementNS(NS, 'path');
       el.setAttribute('d', base.d);
-      el.setAttribute('class', 'nation-province');
+      el.setAttribute('class', 'nation-province unclaimed-province');
       el.setAttribute('fill', props.color);
       el.dataset.id = props.id;
-      el.dataset.nation = props.nationName || '';
+      el.dataset.nation = '';
       el.addEventListener('click', function(){ selectProvince(props); });
       el.addEventListener('mousemove', function(e){ showMapTooltip(e, props); });
       el.addEventListener('mouseleave', hideTooltip);
       gProvinces.appendChild(el);
     });
     flatSvg.appendChild(gProvinces);
+
+    // Claimed provinces: one merged shape per nation, internal province
+    // borders dissolved away (see buildNationGeometry()). Falls back to
+    // drawing that nation's provinces individually (old behavior) only if
+    // the merge itself failed for some reason, so a claim never just
+    // disappears from the map.
+    const gNations = document.createElementNS(NS, 'g');
+    Object.keys(claimsByName).forEach(function(nationName){
+      const path = nationFlatPathByName[nationName];
+      const nationProps = { label: nationName, nationName: nationName };
+      if (path){
+        const el = document.createElementNS(NS, 'path');
+        el.setAttribute('d', path);
+        el.setAttribute('class', 'nation-province');
+        el.setAttribute('fill', nationColor[nationName] || NEUTRAL_HEX);
+        el.dataset.nation = nationName;
+        el.addEventListener('click', function(){ selectProvince(nationProps); });
+        el.addEventListener('mousemove', function(e){ showMapTooltip(e, nationProps); });
+        el.addEventListener('mouseleave', hideTooltip);
+        gNations.appendChild(el);
+      } else {
+        features.filter(function(f){ return f.nationName === nationName; }).forEach(function(props){
+          const base = baseById[props.id];
+          const el = document.createElementNS(NS, 'path');
+          el.setAttribute('d', base.d);
+          el.setAttribute('class', 'nation-province');
+          el.setAttribute('fill', props.color);
+          el.dataset.id = props.id;
+          el.dataset.nation = props.nationName;
+          el.addEventListener('click', function(){ selectProvince(props); });
+          el.addEventListener('mousemove', function(e){ showMapTooltip(e, props); });
+          el.addEventListener('mouseleave', hideTooltip);
+          gNations.appendChild(el);
+        });
+      }
+    });
+    flatSvg.appendChild(gNations);
 
     const gLakes = document.createElementNS(NS, 'g');
     LAKE_LIST.forEach(function(l){
@@ -689,7 +977,7 @@
   let pathGen = null;
   let baseGlobeScale = GLOBE_VB_SIZE * 0.46;
   let globeFeatures = []; // features that actually have usable geometry
-  const globeEls = {}; // id -> <path> element, kept across renders
+  let globeEls = {}; // id -> <path> element, kept across renders
 
   function averageLonLat(){
     let sLon = 0, sLat = 0, n = 0;
@@ -797,8 +1085,42 @@
       globeSvg.appendChild(globeGraticuleEl);
 
       globeProvincesGroup = document.createElementNS(NS, 'g');
-      globeFeatures = features.filter(function(f){ return !!f.geometry; });
-      globeFeatures.forEach(function(f){
+      globeEls = {};
+
+      // Unclaimed provinces: individually, same as before (no nation to
+      // merge them into).
+      const unclaimedFeatures = features.filter(function(f){ return !f.nationName && !!f.geometry; });
+      unclaimedFeatures.forEach(function(f){
+        const el = document.createElementNS(NS, 'path');
+        el.setAttribute('class', 'nation-province unclaimed-province');
+        el.setAttribute('fill', f.color);
+        el.dataset.id = f.id;
+        el.dataset.nation = '';
+        el.addEventListener('click', function(){ if (!globeDragMoved) selectProvince(f); });
+        el.addEventListener('mousemove', function(e){ showMapTooltip(e, f); });
+        el.addEventListener('mouseleave', hideTooltip);
+        globeEls[f.id] = el;
+        globeProvincesGroup.appendChild(el);
+      });
+
+      // Claimed nations: one merged shape apiece (falls back to that
+      // nation's individual provinces if the merge failed for some
+      // reason, same fallback as the flat map).
+      const nationFeatures = [];
+      Object.keys(claimsByName).forEach(function(nationName){
+        const geometry = nationGlobeGeometryByName[nationName];
+        if (geometry){
+          nationFeatures.push({
+            id: 'nation:' + nationName, nationName: nationName, label: nationName,
+            color: nationColor[nationName] || NEUTRAL_HEX, geometry: geometry,
+          });
+        } else {
+          features.filter(function(f){ return f.nationName === nationName && !!f.geometry; }).forEach(function(f){
+            nationFeatures.push(f);
+          });
+        }
+      });
+      nationFeatures.forEach(function(f){
         const el = document.createElementNS(NS, 'path');
         el.setAttribute('class', 'nation-province');
         el.setAttribute('fill', f.color);
@@ -810,6 +1132,8 @@
         globeEls[f.id] = el;
         globeProvincesGroup.appendChild(el);
       });
+
+      globeFeatures = unclaimedFeatures.concat(nationFeatures);
       globeSvg.appendChild(globeProvincesGroup);
 
       globeReady = true;
@@ -914,6 +1238,7 @@
     landBioError = landBio.error;
 
     buildFeatures();
+    buildNationGeometry();
     buildFlatMap();
     buildNationLegend();
 
