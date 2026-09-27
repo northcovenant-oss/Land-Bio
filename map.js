@@ -262,7 +262,7 @@
       if(layer.type === 'data'){ fill = p.fill; }
       else if(layer.type === 'neutral'){ fill = getNeutralFill(); }
       else if(layer.type === 'climate'){
-        fill = p.climate ? CLIMATE_COLOR[p.climate.dominant] : '#cabf9e';
+        fill = p.climate ? CLIMATE_COLOR[p.climate.display || p.climate.dominant] : '#cabf9e';
       }
       // see-through (but still clickable) so the topography shows beneath the borders
       else if(layer.type === 'image'){ fill = 'rgba(0,0,0,0)'; }
@@ -300,7 +300,7 @@
       const row = document.createElement('div');
       row.className = 'legend-row';
       const present = type === 'image' ? true : (type === 'climate'
-        ? PROVINCES.some(function(p){ return p.climate && p.climate.dominant === key; })
+        ? PROVINCES.some(function(p){ return p.climate && (p.climate.display || p.climate.dominant) === key; })
         : PROVINCES.some(function(p){ return p.econ === key; }));
       row.innerHTML =
         '<span class="legend-swatch" style="background:'+item.color+'"></span>' +
