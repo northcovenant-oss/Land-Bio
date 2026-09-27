@@ -834,6 +834,9 @@
     Array.from(globeSvg.querySelectorAll('.nation-province')).forEach(function(el){
       el.classList.toggle('picked', !!selectedNationName && el.dataset.nation === selectedNationName);
     });
+    Array.from(globeSvg.querySelectorAll('.nation-border')).forEach(function(el){
+      el.classList.toggle('picked', !!selectedNationName && el.dataset.nation === selectedNationName);
+    });
   }
 
   // =========================================================================
@@ -861,8 +864,16 @@
 
   function showMapTooltip(e, props){
     const rect = mapFrame.getBoundingClientRect();
-    const sub = props.nationName ? ('Claimed by ' + props.nationName) : 'Unclaimed';
-    tooltip.innerHTML = escapeHtml(props.label) + '<div class="sub">' + escapeHtml(sub) + '</div>';
+    // Unclaimed land is now one solid shape per continent/island with no
+    // visible province seams, so naming the specific province on hover
+    // would be telling the visitor something the map itself no longer
+    // shows them. Clicking still opens that exact province's info panel
+    // (econ/climate) - this only trims the passive hover tooltip.
+    if (!props.nationName){
+      tooltip.innerHTML = 'Unclaimed';
+    } else {
+      tooltip.innerHTML = escapeHtml(props.label) + '<div class="sub">Claimed by ' + escapeHtml(props.nationName) + '</div>';
+    }
     tooltip.style.left = (e.clientX - rect.left) + 'px';
     tooltip.style.top = (e.clientY - rect.top) + 'px';
     tooltip.classList.add('show');
@@ -1035,6 +1046,45 @@
   if (zoomResetBtn) zoomResetBtn.addEventListener('click', resetView);
 
   // =========================================================================
+  // 6b. Globe terrain: a procedural, climate-biased relief render (ported
+  //     from the "satellite physical map" appearance study). This is NOT
+  //     the climate legend recolored - elevation is fractal noise, and
+  //     climate only nudges where a province sits on a shared green ->
+  //     tan -> grey -> white ramp (wet = greener, arid = browner), via a
+  //     whole SVG filter chain (feTurbulence/feDiffuseLighting/etc.) that
+  //     runs once across the ENTIRE globe, not per-province - see
+  //     buildGlobeView() below for why that matters.
+  //     The ramp runs low-input -> green, high-input -> tan/white, so this
+  //     bias table must run the SAME direction: low = wet/green climate,
+  //     high = dry/mountainous climate. Keyed to this dataset's exact
+  //     CLIMATE_LEGEND names, not guessed keywords.
+  // =========================================================================
+
+  const CLIMATE_BIAS_MAP = {
+    'tropical rainforest': 0.05,
+    'tropical monsoon': 0.18,
+    'humid sub-tropical': 0.22,
+    'oceanic': 0.26,
+    'humid continental': 0.32,
+    'tropical wet dry': 0.38,
+    'mediterranean': 0.40,
+    'sub arctic': 0.76,
+    'polar': 0.80,
+    'semi-arid': 0.83,
+    'highlands': 0.86,
+    'arid': 0.95,
+  };
+  function climateBias(climateName){
+    const key = (climateName || '').toLowerCase();
+    return CLIMATE_BIAS_MAP.hasOwnProperty(key) ? CLIMATE_BIAS_MAP[key] : 0.5;
+  }
+  function svgEl(tag, attrs){
+    const node = document.createElementNS(NS, tag);
+    if (attrs) Object.keys(attrs).forEach(function(k){ node.setAttribute(k, attrs[k]); });
+    return node;
+  }
+
+  // =========================================================================
   // 7. Globe renderer (d3-geo orthographic projection)
   //
   // This is plain 2D SVG: d3.geoOrthographic() projects each lon/lat point
@@ -1081,18 +1131,24 @@
     if (!globeReady) return;
     try {
       globeSphereEl.setAttribute('d', pathGen({ type: 'Sphere' }) || '');
-      globeGraticuleEl.setAttribute('d', pathGen(d3.geoGraticule()()) || '');
+      if (globeGraticuleEl) globeGraticuleEl.setAttribute('d', pathGen(d3.geoGraticule()()) || '');
       globeFeatures.forEach(function(f){
         const el = globeEls[f.id];
         if (!el) return;
         el.setAttribute('d', pathGen(f.geometry) || '');
       });
+      if (globeLimbEl){
+        const t = projection.translate(), s = projection.scale();
+        globeLimbEl.setAttribute('cx', t[0]);
+        globeLimbEl.setAttribute('cy', t[1]);
+        globeLimbEl.setAttribute('r', s);
+      }
     } catch (e){
       handleGlobeFailure(e);
     }
   }
 
-  let globeSphereEl, globeGraticuleEl, globeProvincesGroup;
+  let globeSphereEl, globeGraticuleEl, globeProvincesGroup, globeLimbEl;
 
   // Separate from globeReady on purpose: globeReady starts out false and
   // ONLY ever becomes true after a successful build, so a guard of
@@ -1153,94 +1209,181 @@
         .precision(0.3);
       pathGen = d3.geoPath(projection);
 
-      globeSphereEl = document.createElementNS(NS, 'path');
-      globeSphereEl.setAttribute('class', 'globe-sphere');
-      globeSphereEl.setAttribute('fill', WATER); // ocean color, same as the flat map's background
-      globeSvg.appendChild(globeSphereEl);
-
-      globeGraticuleEl = document.createElementNS(NS, 'path');
-      globeGraticuleEl.setAttribute('class', 'globe-graticule');
-      globeSvg.appendChild(globeGraticuleEl);
-
-      globeProvincesGroup = document.createElementNS(NS, 'g');
       globeEls = {};
+      globeFeatures = [];
 
-      // Unclaimed land: one solid, non-interactive shape per continent/
-      // island (see buildUnclaimedGeometry()), drawn first (bottom of the
-      // stack) - exactly like the flat map.
-      const continentShapeFeatures = [];
-      Object.keys(continentGlobeGeometryById).forEach(function(continentId){
-        continentShapeFeatures.push({
-          id: 'continent:' + continentId, label: continentId,
-          color: tintForContinent(continentId), geometry: continentGlobeGeometryById[continentId],
-        });
-      });
-      const failedContinents = {};
-      (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
-        if (!continentGlobeGeometryById[c.id]) failedContinents[c.id] = true;
-      });
-      continentShapeFeatures.forEach(function(f){
-        const el = document.createElementNS(NS, 'path');
-        el.setAttribute('class', 'nation-province continent-shape');
-        el.setAttribute('fill', f.color);
-        el.dataset.id = f.id;
-        globeEls[f.id] = el;
-        globeProvincesGroup.appendChild(el);
-      });
+      const defs = svgEl('defs');
 
-      // Invisible per-province click/hover targets on top of that solid
-      // fill, same reasoning as the flat map's gProvinceHitboxes - keeps
-      // "click empty land to see that province" working without showing
-      // province outlines. Falls back to a visible fill (instead of
-      // transparent) only for a continent whose merge failed, same
-      // fallback as the flat map, so land never just disappears.
-      const unclaimedFeatures = features.filter(function(f){ return !f.nationName && !!f.geometry; });
-      unclaimedFeatures.forEach(function(f){
-        const base = baseById[f.id];
-        const el = document.createElementNS(NS, 'path');
-        el.setAttribute('class', 'unclaimed-hitbox');
-        el.setAttribute('fill', failedContinents[base.continent] ? f.color : 'transparent');
-        el.dataset.id = f.id;
-        el.dataset.nation = '';
-        el.addEventListener('click', function(){ if (!globeDragMoved) selectProvince(f); });
-        el.addEventListener('mousemove', function(e){ showMapTooltip(e, f); });
-        el.addEventListener('mouseleave', hideTooltip);
-        globeEls[f.id] = el;
-        globeProvincesGroup.appendChild(el);
-      });
+      // Deep, saturated satellite-photo ocean blue.
+      const oceanGrad = svgEl('radialGradient', { id: 'globe-ocean', cx: '38%', cy: '32%', r: '80%' });
+      oceanGrad.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#2f7fae' }));
+      oceanGrad.appendChild(svgEl('stop', { offset: '55%', 'stop-color': '#1c5c86' }));
+      oceanGrad.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#0d3a5c' }));
+      defs.appendChild(oceanGrad);
 
-      // Claimed nations: one merged shape apiece (falls back to that
-      // nation's individual provinces if the merge failed for some
-      // reason, same fallback as the flat map).
-      const nationFeatures = [];
+      // Faint limb-darkening vignette so the sphere reads like a photo.
+      const limbGrad = svgEl('radialGradient', { id: 'globe-limb', cx: '38%', cy: '32%', r: '75%' });
+      limbGrad.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#000000', 'stop-opacity': '0' }));
+      limbGrad.appendChild(svgEl('stop', { offset: '72%', 'stop-color': '#000000', 'stop-opacity': '0' }));
+      limbGrad.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#01111f', 'stop-opacity': '0.35' }));
+      defs.appendChild(limbGrad);
+
+      // Every province with usable geometry, claimed or not - ownership no
+      // longer changes a province's fill (see the border overlay below),
+      // so claimed and unclaimed land are treated identically here.
+      const landFeatures = features.filter(function(f){ return !!f.geometry; });
+
+      // Hidden per-province grayscale field, sampled by the terrain filter
+      // below via feImage - lets climate NUDGE where a province lands on
+      // the shared green<->tan<->white ramp, without ever supplying its
+      // own hex colors. Lives in <defs> (never rendered directly), but
+      // its paths still need re-projecting every frame like visible land,
+      // so the bias field stays aligned with the coastlines as the globe
+      // rotates/zooms.
+      const biasfieldG = svgEl('g', { id: 'globe-biasfield' });
+      landFeatures.forEach(function(f){
+        const gray = Math.round(climateBias(f.climate) * 255);
+        const p = svgEl('path', { fill: 'rgb(' + gray + ',' + gray + ',' + gray + ')' });
+        biasfieldG.appendChild(p);
+        globeEls['bias:' + f.id] = p;
+        globeFeatures.push({ id: 'bias:' + f.id, geometry: f.geometry });
+      });
+      defs.appendChild(biasfieldG);
+
+      // Procedural terrain filter (ported from the "satellite physical
+      // map" appearance study): fractal-noise elevation, hillshaded via
+      // feDiffuseLighting, colorized via a feComponentTransfer ramp that
+      // climate only nudges (never supplies its own colors), plus grey
+      // highland / white peak-cap bands driven purely by elevation. This
+      // is applied ONCE to a single <g> holding every province's landmask
+      // path (below) - never per-province - so the noise field reads as
+      // one continuous world instead of ~1200 independently-offset
+      // patches, and so it's evaluated once per frame instead of ~1200
+      // times.
+      const terrain = svgEl('filter', { id: 'globe-terrain', x: '-20%', y: '-20%', width: '140%', height: '140%' });
+      terrain.appendChild(svgEl('feTurbulence', { type: 'fractalNoise', baseFrequency: '0.01 0.01', numOctaves: '3', seed: '27', result: 'elevNoiseRaw' }));
+      terrain.appendChild(svgEl('feGaussianBlur', { in: 'elevNoiseRaw', stdDeviation: '6', result: 'elevNoise' }));
+      terrain.appendChild(svgEl('feColorMatrix', { in: 'elevNoise', type: 'matrix', values: '0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1', result: 'elevGray' }));
+      terrain.appendChild(svgEl('feImage', { href: '#globe-biasfield', x: '0', y: '0', width: String(GLOBE_VB_SIZE), height: String(GLOBE_VB_SIZE), result: 'climateBiasImg' }));
+      terrain.appendChild(svgEl('feColorMatrix', { in: 'climateBiasImg', type: 'matrix', values: '0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1', result: 'climateBiasGray' }));
+      terrain.appendChild(svgEl('feGaussianBlur', { in: 'climateBiasGray', stdDeviation: '18', result: 'climateBiasSoft' }));
+      terrain.appendChild(svgEl('feComposite', { in: 'elevGray', in2: 'climateBiasSoft', operator: 'arithmetic', k1: '0', k2: '0.35', k3: '0.65', k4: '0', result: 'biasedElev' }));
+      const ramp = svgEl('feComponentTransfer', { in: 'biasedElev', result: 'elevRamp' });
+      ramp.appendChild(svgEl('feFuncR', { type: 'table', tableValues: '0.16 0.50 0.70 0.62' }));
+      ramp.appendChild(svgEl('feFuncG', { type: 'table', tableValues: '0.42 0.58 0.58 0.46' }));
+      ramp.appendChild(svgEl('feFuncB', { type: 'table', tableValues: '0.22 0.30 0.38 0.30' }));
+      terrain.appendChild(ramp);
+      terrain.appendChild(svgEl('feColorMatrix', { in: 'elevRamp', type: 'saturate', values: '1.25', result: 'elevRampVivid' }));
+      terrain.appendChild(svgEl('feGaussianBlur', { in: 'elevRampVivid', stdDeviation: '0.6', result: 'elevRampSoft' }));
+      const lighting = svgEl('feDiffuseLighting', { in: 'elevNoise', surfaceScale: '18', diffuseConstant: '1', 'lighting-color': '#ffffff', result: 'reliefRaw' });
+      lighting.appendChild(svgEl('feDistantLight', { azimuth: '235', elevation: '45' }));
+      terrain.appendChild(lighting);
+      const reliefSoft = svgEl('feComponentTransfer', { in: 'reliefRaw', result: 'reliefSoft' });
+      reliefSoft.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.95', intercept: '0.10' }));
+      reliefSoft.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.95', intercept: '0.10' }));
+      reliefSoft.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.95', intercept: '0.10' }));
+      terrain.appendChild(reliefSoft);
+      terrain.appendChild(svgEl('feBlend', { in: 'elevRampSoft', in2: 'reliefSoft', mode: 'multiply', result: 'shadedTerrain' }));
+
+      const elevContrast = svgEl('feComponentTransfer', { in: 'elevGray', result: 'elevContrast' });
+      elevContrast.appendChild(svgEl('feFuncR', { type: 'linear', slope: '2.4', intercept: '-0.7' }));
+      elevContrast.appendChild(svgEl('feFuncG', { type: 'linear', slope: '2.4', intercept: '-0.7' }));
+      elevContrast.appendChild(svgEl('feFuncB', { type: 'linear', slope: '2.4', intercept: '-0.7' }));
+      terrain.appendChild(elevContrast);
+
+      const greyMask = svgEl('feComponentTransfer', { in: 'elevContrast', result: 'greyMask' });
+      greyMask.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+      greyMask.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+      greyMask.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+      terrain.appendChild(greyMask);
+      terrain.appendChild(svgEl('feColorMatrix', { in: 'greyMask', type: 'matrix', values: '0 0 0 0 0.56  0 0 0 0 0.57  0 0 0 0 0.58  1 0 0 0 0', result: 'greyLayer' }));
+      terrain.appendChild(svgEl('feComposite', { in: 'greyLayer', in2: 'shadedTerrain', operator: 'over', result: 'withGrey' }));
+
+      const whiteMask = svgEl('feComponentTransfer', { in: 'elevContrast', result: 'whiteMask' });
+      whiteMask.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '9', offset: '0' }));
+      whiteMask.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '9', offset: '0' }));
+      whiteMask.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '9', offset: '0' }));
+      terrain.appendChild(whiteMask);
+      terrain.appendChild(svgEl('feColorMatrix', { in: 'whiteMask', type: 'matrix', values: '0 0 0 0 0.97  0 0 0 0 0.97  0 0 0 0 0.95  1 0 0 0 0', result: 'whiteLayer' }));
+      terrain.appendChild(svgEl('feComposite', { in: 'whiteLayer', in2: 'withGrey', operator: 'over', result: 'withCaps' }));
+
+      terrain.appendChild(svgEl('feComposite', { in: 'withCaps', in2: 'SourceGraphic', operator: 'in' }));
+      defs.appendChild(terrain);
+
+      globeSvg.appendChild(defs);
+
+      // Ocean sphere. Set via inline style, not the fill attribute alone -
+      // '#globeSvg .globe-sphere{ fill: var(--panel-bg) }' in globe.css
+      // would otherwise win the cascade over a plain presentation
+      // attribute, since both have equal specificity but the stylesheet
+      // rule is declared later.
+      globeSphereEl = svgEl('path', { class: 'globe-sphere' });
+      globeSphereEl.style.fill = 'url(#globe-ocean)';
+      globeSvg.appendChild(globeSphereEl);
+      globeGraticuleEl = null; // lat/lon lines don't read well over terrain; omitted here
+
+      // Single continuous landmask: every province, claimed or not, drawn
+      // as a solid black silhouette (a mask only - all real color comes
+      // from the terrain filter applied to this whole <g>) and clipped to
+      // the actual coastlines by the filter's final feComposite
+      // operator="in" against SourceGraphic. A matching stroke on each
+      // path closes hairline anti-aliasing seams between neighboring
+      // provinces once the mask is rasterized through the filter.
+      const landMaskG = svgEl('g', { id: 'globe-landmask', filter: 'url(#globe-terrain)' });
+      landMaskG.style.pointerEvents = 'none';
+      landFeatures.forEach(function(f){
+        const p = svgEl('path', { fill: '#000000', stroke: '#000000', 'stroke-width': '1' });
+        landMaskG.appendChild(p);
+        globeEls['land:' + f.id] = p;
+        globeFeatures.push({ id: 'land:' + f.id, geometry: f.geometry });
+      });
+      globeSvg.appendChild(landMaskG);
+
+      // Invisible per-province click/hover targets on top of the terrain -
+      // every province now (claimed or not), since ownership no longer
+      // shows as a per-province fill color.
+      const hitboxG = svgEl('g');
+      landFeatures.forEach(function(f){
+        const p = svgEl('path', { class: 'unclaimed-hitbox', fill: 'transparent' });
+        p.dataset.id = f.id;
+        p.dataset.nation = f.nationName || '';
+        p.addEventListener('click', function(){ if (!globeDragMoved) selectProvince(f); });
+        p.addEventListener('mousemove', function(e){ showMapTooltip(e, f); });
+        p.addEventListener('mouseleave', hideTooltip);
+        hitboxG.appendChild(p);
+        globeEls[f.id] = p;
+        globeFeatures.push({ id: f.id, geometry: f.geometry });
+      });
+      globeSvg.appendChild(hitboxG);
+
+      // Ownership: a colored border traced around each nation's merged
+      // territory (nationGlobeGeometryByName), drawn on top of the
+      // terrain, instead of a solid per-province fill color. A nation
+      // whose merge failed simply has no border drawn (its land still
+      // renders as terrain and is still clickable via the hitbox layer
+      // above) - logged the same way mergeProvinceGeometry() already
+      // logs a failed merge elsewhere in this file.
+      const borderG = svgEl('g');
       Object.keys(claimsByName).forEach(function(nationName){
         const geometry = nationGlobeGeometryByName[nationName];
-        if (geometry){
-          nationFeatures.push({
-            id: 'nation:' + nationName, nationName: nationName, label: nationName,
-            color: nationColor[nationName] || NEUTRAL_HEX, geometry: geometry,
-          });
-        } else {
-          features.filter(function(f){ return f.nationName === nationName && !!f.geometry; }).forEach(function(f){
-            nationFeatures.push(f);
-          });
+        if (!geometry){
+          console.warn('[Map] No merged globe geometry for ' + nationName + ' - skipping its border overlay');
+          return;
         }
+        const p = svgEl('path', {
+          class: 'nation-border', fill: 'none',
+          stroke: nationColor[nationName] || NEUTRAL_HEX, 'stroke-width': '2.4',
+        });
+        p.dataset.nation = nationName;
+        borderG.appendChild(p);
+        globeEls['border:' + nationName] = p;
+        globeFeatures.push({ id: 'border:' + nationName, geometry: geometry });
       });
-      nationFeatures.forEach(function(f){
-        const el = document.createElementNS(NS, 'path');
-        el.setAttribute('class', 'nation-province');
-        el.setAttribute('fill', f.color);
-        el.dataset.id = f.id;
-        el.dataset.nation = f.nationName || '';
-        el.addEventListener('click', function(){ if (!globeDragMoved) selectProvince(f); });
-        el.addEventListener('mousemove', function(e){ showMapTooltip(e, f); });
-        el.addEventListener('mouseleave', hideTooltip);
-        globeEls[f.id] = el;
-        globeProvincesGroup.appendChild(el);
-      });
+      globeSvg.appendChild(borderG);
 
-      globeFeatures = continentShapeFeatures.concat(unclaimedFeatures, nationFeatures);
-      globeSvg.appendChild(globeProvincesGroup);
+      globeLimbEl = svgEl('circle', { fill: 'url(#globe-limb)' });
+      globeLimbEl.style.pointerEvents = 'none';
+      globeSvg.appendChild(globeLimbEl);
 
       globeReady = true;
       renderGlobe();

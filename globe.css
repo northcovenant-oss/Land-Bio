@@ -88,6 +88,18 @@ path.unclaimed-hitbox{ cursor: pointer; }
 path.continent-shape{ pointer-events: none; }
 
 /*
+ * Globe ownership overlay: with the terrain render, every province (claimed
+ * or not) gets the same procedural relief fill, so ownership is shown as a
+ * colored outline traced around each nation's merged territory instead of a
+ * solid per-province fill color. Deliberately its own class rather than
+ * reusing path.nation-province above - that rule's "stroke: none" and
+ * gold .picked outline are built around a *filled* shape and would either
+ * hide this stroke-only path or conflict with its per-nation stroke color.
+ */
+path.nation-border{ fill: none; pointer-events: none; transition: filter 0.15s ease; }
+path.nation-border.picked{ filter: brightness(1.35); stroke-width: 3.4; }
+
+/*
  * ---------- Nation info popup ----------
  * Floating, semi-transparent card instead of a dedicated side panel, so
  * the map/globe gets the full width. Docked to the right edge, vertically
