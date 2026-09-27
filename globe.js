@@ -600,6 +600,45 @@
   }
 
   // =========================================================================
+  // 2d. Full continent base layer (claims INCLUDED, unlike 2c above) - used
+  //     only as the solid ground the Modern appearance's nation-colored
+  //     claim shapes get painted on top of (globe classic layer + flat
+  //     map), never as a click/hover target of its own.
+  //
+  //     2c's continent shape deliberately traces a hole around each claim
+  //     so the claim's own shape is what's visible there - but that shape
+  //     and the claim's independently-dissolved-and-simplified shape can
+  //     come out not quite matching at their shared edge (the same
+  //     per-province-simplification mismatch mergeProvinceGeometry()'s own
+  //     comment describes), leaving a hairline gap down to the ocean/page
+  //     background right along a claim's border. A full continent shape
+  //     with no hole there at all means a claim's shape only ever needs to
+  //     be painted OVER solid land, not fitted exactly into a hole cut to
+  //     its size - so the same hairline mismatch, if it still happens, is
+  //     just a sliver of continent tint peeking out along the border
+  //     instead of a gap down to open ocean.
+  // =========================================================================
+
+  let continentFullFlatPathById = {};      // continentId -> SVG 'd' string (pixel space)
+  let continentFullGlobeGeometryById = {}; // continentId -> GeoJSON Polygon/MultiPolygon (lon/lat)
+
+  function buildFullContinentGeometry(){
+    continentFullFlatPathById = {};
+    continentFullGlobeGeometryById = {};
+
+    const provincesByContinent = {};
+    baseProvinces.forEach(function(p){
+      (provincesByContinent[p.continent] = provincesByContinent[p.continent] || []).push(p);
+    });
+
+    Object.keys(provincesByContinent).forEach(function(continentId){
+      const merged = mergeProvinceGeometry(provincesByContinent[continentId], 'full continent ' + continentId);
+      if (merged.flatPath) continentFullFlatPathById[continentId] = merged.flatPath;
+      if (merged.globeGeometry) continentFullGlobeGeometryById[continentId] = merged.globeGeometry;
+    });
+  }
+
+  // =========================================================================
   // 3. Land Bio Data sheet (richer per-nation fields for the info panel)
   // =========================================================================
 
@@ -879,14 +918,16 @@
     });
     flatSvg.appendChild(gIslands);
 
-    // Unclaimed land: one solid shape per continent/island (see
-    // buildUnclaimedGeometry()), internal province borders dissolved away
-    // - purely visual, not interactive, so it can't shadow the per-
-    // province hit targets drawn right after it.
+    // Solid ground for the whole continent - claimed territory included,
+    // not just unclaimed land (see buildFullContinentGeometry()) - so the
+    // claim shapes drawn later paint over solid land instead of needing to
+    // fit exactly into a hole cut to their size. Purely visual, not
+    // interactive, so it can't shadow the per-province hit targets drawn
+    // right after it.
     const gContinents = document.createElementNS(NS, 'g');
-    Object.keys(continentFlatPathById).forEach(function(continentId){
+    Object.keys(continentFullFlatPathById).forEach(function(continentId){
       const el = document.createElementNS(NS, 'path');
-      el.setAttribute('d', continentFlatPathById[continentId]);
+      el.setAttribute('d', continentFullFlatPathById[continentId]);
       el.setAttribute('class', 'nation-province');
       el.setAttribute('fill', tintForContinent(continentId));
       el.style.pointerEvents = 'none';
@@ -899,7 +940,7 @@
     // its merge failed for some reason, so land never just disappears.
     const failedContinents = {};
     (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
-      if (!continentFlatPathById[c.id]) failedContinents[c.id] = true;
+      if (!continentFullFlatPathById[c.id]) failedContinents[c.id] = true;
     });
 
     // Invisible per-province click/hover targets, drawn on top of the
@@ -1175,25 +1216,37 @@
 
   let globeSphereEl, globeGraticuleEl, globeProvincesGroup, globeLimbEl;
   let globeZoomG = null;
-  let globeZoomFactor = 1;
+  let globeZoomFactor = 1.3; // default view is 130% zoomed in
 
-  // Zoom is a CSS/SVG transform on globeZoomG, NOT a bigger
-  // projection.scale(). It used to be projection.scale() directly (so
+  // Zoom is a CSS transform on the <svg> element itself (see below), NOT
+  // a bigger projection.scale() and NOT an SVG transform attribute on a
+  // group inside the SVG. It used to be projection.scale() directly (so
   // "zoom" meant literally inflating every projected path's coordinate
-  // values) - that made zooming in on the relief appearance blow the
-  // terrain filter's raster region up along with it, and past some point
-  // (depends on the browser's own texture-size cap, which scales with the
-  // actual on-screen pixel size - so it took a wide window plus a fair
-  // amount of zoom to hit) the filter's output just got clipped to a hard
-  // rectangle instead of covering the whole sphere. Scaling a wrapping
-  // group post-render keeps every path's own coordinates - and so the
-  // filter's region - fixed to the sphere's un-zoomed size, no matter how
-  // far in the visitor zooms or how big their window is.
+  // values), which blew the terrain filter's raster region up along with
+  // it; moving that to an inner <g>'s SVG transform attribute instead
+  // *looked* like a fix but wasn't a full one - the filter still got
+  // rasterized at the final on-screen zoomed-in size either way, and on
+  // a wide, high-DPI window a few zoom-in steps was enough to exceed the
+  // browser's raster cap and clip the terrain to a rectangle (or, past
+  // that, drop the filter entirely and show flat unfiltered fill).
   function applyGlobeZoom(){
-    if (!globeZoomG) return;
-    const c = GLOBE_VB_SIZE / 2;
-    globeZoomG.setAttribute('transform',
-      'translate(' + c + ',' + c + ') scale(' + globeZoomFactor + ') translate(' + (-c) + ',' + (-c) + ')');
+    if (!globeSvg) return;
+    // A CSS transform on the <svg> element itself, NOT an SVG transform
+    // attribute on a group inside it. Those look equivalent but aren't:
+    // scaling an inner <g> still leaves the filtered content and the
+    // browser's on-screen size for it in the same paint/raster pass, so
+    // the terrain filter gets asked to rasterize at the final zoomed-in
+    // pixel size - on a wide, high-DPI window this can still exceed the
+    // raster cap this whole zoom scheme exists to avoid (confirmed by
+    // reproducing it at 1920x1080 @2x + a few zoom-in scroll steps).
+    // Scaling the <svg> element via CSS instead makes it an ordinary
+    // compositor layer: the browser rasterizes the SVG (filter included)
+    // once at its un-zoomed, laid-out size, then the GPU just stretches
+    // that bitmap for display, the same cheap way it would scale an
+    // <img> or <canvas> - so filter cost and raster size never depend on
+    // zoom level or window size at all.
+    globeSvg.style.transformOrigin = 'center center';
+    globeSvg.style.transform = globeZoomFactor === 1 ? '' : 'scale(' + globeZoomFactor + ')';
   }
   let globeLandEl = null, globeLandFeatures = [];
 
@@ -1251,7 +1304,8 @@
 
       const avg = averageLonLat();
       projection = d3.geoOrthographic()
-        .scale(baseGlobeScale * 1.3) // default zoom: 130%
+        .scale(baseGlobeScale) // default 130% zoom is applied via applyGlobeZoom()/globeZoomFactor
+                                // instead of inflating this - see applyGlobeZoom() for why.
         .translate([GLOBE_VB_SIZE / 2, GLOBE_VB_SIZE / 2])
         .rotate([-avg.lon, -avg.lat])
         .clipAngle(90)
@@ -1267,10 +1321,8 @@
       globeLimbEl = null;
 
       // Everything actually drawn (as opposed to <defs>) goes inside this
-      // one group instead of straight onto globeSvg, so "zoom" (below) can
-      // be a CSS/SVG transform on this group rather than a bigger
-      // projection.scale(). See applyGlobeZoom() for why that distinction
-      // matters - it's not just style, it avoids a real rendering bug.
+      // one group instead of straight onto globeSvg. Zoom itself is a CSS
+      // transform on globeSvg, not on this group - see applyGlobeZoom().
       globeZoomG = svgEl('g', { id: 'globe-zoom-g' });
       globeSvg.appendChild(globeZoomG);
 
@@ -1638,19 +1690,21 @@
 
     const globeProvincesGroup = svgEl('g');
 
-    // Unclaimed land: one solid, non-interactive shape per continent/
-    // island (see buildUnclaimedGeometry()), drawn first (bottom of the
-    // stack) - exactly like the flat map.
+    // Solid ground for the whole continent - claimed territory included,
+    // not just unclaimed land (see buildFullContinentGeometry()), drawn
+    // first (bottom of the stack) - exactly like the flat map. This means
+    // the claim shapes drawn below paint over solid land instead of
+    // needing to fit exactly into a hole cut to their size.
     const continentShapeFeatures = [];
-    Object.keys(continentGlobeGeometryById).forEach(function(continentId){
+    Object.keys(continentFullGlobeGeometryById).forEach(function(continentId){
       continentShapeFeatures.push({
         id: 'continent:' + continentId, label: continentId,
-        color: tintForContinent(continentId), geometry: continentGlobeGeometryById[continentId],
+        color: tintForContinent(continentId), geometry: continentFullGlobeGeometryById[continentId],
       });
     });
     const failedContinents = {};
     (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
-      if (!continentGlobeGeometryById[c.id]) failedContinents[c.id] = true;
+      if (!continentFullGlobeGeometryById[c.id]) failedContinents[c.id] = true;
     });
     continentShapeFeatures.forEach(function(f){
       const p = svgEl('path', { class: 'nation-province continent-shape', fill: f.color });
@@ -1748,7 +1802,12 @@
     if (!globeReady) return;
     e.preventDefault();
     const factor = e.deltaY > 0 ? 1/1.15 : 1.15;
-    globeZoomFactor = Math.max(0.5, Math.min(5, globeZoomFactor * factor));
+    // Capped at 4x (was 5x): on a large, high-DPI display the relief
+    // appearance's terrain filter can still hit the browser's raster-size
+    // cap right at the old ceiling - see applyGlobeZoom() above. 4x tested
+    // clean up to a 1920x1080 window at 2x device pixel ratio (a
+    // 3840x2160 render, i.e. a 4K display); 5x didn't.
+    globeZoomFactor = Math.max(0.5, Math.min(4, globeZoomFactor * factor));
     applyGlobeZoom();
   }, { passive: false });
 
@@ -1825,6 +1884,7 @@
     buildFeatures();
     buildNationGeometry();
     buildUnclaimedGeometry();
+    buildFullContinentGeometry();
     buildFlatMap();
 
     if (!claims.length){
