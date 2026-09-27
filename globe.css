@@ -68,6 +68,26 @@ path.nation-province:hover{ filter: brightness(1.15); }
 path.nation-province.picked{ filter: brightness(1.2); stroke: var(--gold-bright); stroke-width: 1.6; }
 
 /*
+ * Unclaimed land is drawn as one solid shape per continent/island (see
+ * buildUnclaimedGeometry() in globe.js) - path.nation-province above
+ * already covers its outline-free look. These invisible per-province
+ * paths sit on top purely to keep "click/hover empty land to see that
+ * specific province" working without showing province outlines; their
+ * fill is set to "transparent" (not "none") in JS so they still capture
+ * pointer events.
+ */
+path.unclaimed-hitbox{ cursor: pointer; }
+
+/*
+ * The globe's solid continent/island fill (globe.js's continentShapeFeatures)
+ * sits under its own unclaimed-hitbox layer everywhere it matters, but
+ * pointer-events:none here too as a safety net against any 1px seam
+ * between the two (independent floating-point rounding in the dissolve
+ * vs. d3-geo's own path rendering).
+ */
+path.continent-shape{ pointer-events: none; }
+
+/*
  * ---------- Nation info popup ----------
  * Floating, semi-transparent card instead of a dedicated side panel, so
  * the map/globe gets the full width. Docked to the right edge, vertically

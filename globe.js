@@ -496,6 +496,49 @@
     return d;
   }
 
+  // Shared by both nation merging (above) and continent/island merging
+  // (below, for unclaimed land) - dissolves one group of provinces into
+  // its flat SVG path and globe GeoJSON geometry. Returns {flatPath,
+  // globeGeometry}, either of which can be null if that group had no
+  // usable geometry at all.
+  function mergeProvinceGeometry(provinces, groupLabel){
+    let flatPath = null, globeGeometry = null;
+
+    try {
+      const pixelRings = [];
+      provinces.forEach(function(p){ p.pixelRings.forEach(function(r){ pixelRings.push(r); }); });
+      const mergedPixel = dissolveRings(pixelRings, 2);
+      if (mergedPixel.length) flatPath = multiPolygonToSvgPath(mergedPixel);
+    } catch (e){
+      console.warn('[Map] Could not merge flat-map geometry for ' + groupLabel + ':', e.message);
+    }
+
+    try {
+      // Full, UNsimplified lon/lat rings ("rings", not "globeRings") -
+      // each province's globeRings is independently simplified for
+      // rendering performance, which can nudge two neighboring provinces'
+      // shared border to no longer match exactly on both sides
+      // (confirmed: it does, on this real data - simplifying before
+      // merging left the vast majority of internal borders uncancelled).
+      // Dissolving on the full-detail coordinates first and simplifying
+      // the much-shorter merged result afterward avoids that entirely.
+      const globeRingsFull = [];
+      provinces.forEach(function(p){ p.rings.forEach(function(r){ globeRingsFull.push(r); }); });
+      const mergedGlobe = dissolveRings(globeRingsFull, 7);
+      const simplified = mergedGlobe
+        .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
+        .filter(isUsableRing);
+      if (simplified.length){
+        const polygons = groupRingsForGlobe(simplified, GLOBE_EXTERIOR_SIGN);
+        if (polygons.length) globeGeometry = { type: 'MultiPolygon', coordinates: polygons };
+      }
+    } catch (e){
+      console.warn('[Map] Could not merge globe geometry for ' + groupLabel + ':', e.message);
+    }
+
+    return { flatPath: flatPath, globeGeometry: globeGeometry };
+  }
+
   function buildNationGeometry(){
     nationFlatPathByName = {};
     nationGlobeGeometryByName = {};
@@ -508,40 +551,52 @@
     });
 
     Object.keys(provincesByNation).forEach(function(nationName){
-      const provinces = provincesByNation[nationName];
+      const merged = mergeProvinceGeometry(provincesByNation[nationName], nationName);
+      if (merged.flatPath) nationFlatPathByName[nationName] = merged.flatPath;
+      if (merged.globeGeometry) nationGlobeGeometryByName[nationName] = merged.globeGeometry;
+    });
+  }
 
-      try {
-        const pixelRings = [];
-        provinces.forEach(function(p){ p.pixelRings.forEach(function(r){ pixelRings.push(r); }); });
-        const mergedPixel = dissolveRings(pixelRings, 2);
-        if (mergedPixel.length) nationFlatPathByName[nationName] = multiPolygonToSvgPath(mergedPixel);
-      } catch (e){
-        console.warn('[Map] Could not merge flat-map territory for ' + nationName + ':', e.message);
-      }
+  // =========================================================================
+  // 2c. Unclaimed land: same dissolve, grouped by continent instead of by
+  //     nation, so open land reads as solid continents/islands - "here is
+  //     the land" - rather than a patchwork of 1200 individually-outlined
+  //     province cells. Grouping by continent (not one dissolve for the
+  //     whole world) keeps each continent's own tint color and keeps the
+  //     merge cheap; provinces on different continents never share a
+  //     border anyway, so this produces the exact same shapes a single
+  //     world-wide dissolve would, just with the color bookkeeping done
+  //     for free by the grouping itself. A continent made up of several
+  //     separate islands still comes out right - dissolveRings() already
+  //     returns one closed ring per disconnected landmass, same as it did
+  //     for a nation with non-contiguous claims.
+  //
+  //     Provinces that ARE claimed are excluded from their continent's
+  //     group, same as they're excluded from being drawn individually -
+  //     since only one side of their boundary is present, those edges
+  //     don't cancel out, so the continent shape's own boundary correctly
+  //     traces around claimed territory as a hole (or a bite out of the
+  //     edge), the same way it already traces around a lake.
+  // =========================================================================
 
-      try {
-        // Full, UNsimplified lon/lat rings ("rings", not "globeRings") -
-        // each province's globeRings is independently simplified for
-        // rendering performance, which can nudge two neighboring
-        // provinces' shared border to no longer match exactly on both
-        // sides (confirmed: it does, on this real data - simplifying
-        // before merging left the vast majority of internal borders
-        // uncancelled). Dissolving on the full-detail coordinates first
-        // and simplifying the much-shorter merged result afterward avoids
-        // that entirely.
-        const globeRingsFull = [];
-        provinces.forEach(function(p){ p.rings.forEach(function(r){ globeRingsFull.push(r); }); });
-        const mergedGlobe = dissolveRings(globeRingsFull, 7);
-        const simplified = mergedGlobe
-          .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
-          .filter(isUsableRing);
-        if (simplified.length){
-          const polygons = groupRingsForGlobe(simplified, GLOBE_EXTERIOR_SIGN);
-          if (polygons.length) nationGlobeGeometryByName[nationName] = { type: 'MultiPolygon', coordinates: polygons };
-        }
-      } catch (e){
-        console.warn('[Map] Could not merge globe territory for ' + nationName + ':', e.message);
-      }
+  let continentFlatPathById = {};      // continentId -> SVG 'd' string (pixel space)
+  let continentGlobeGeometryById = {}; // continentId -> GeoJSON Polygon/MultiPolygon (lon/lat)
+
+  function buildUnclaimedGeometry(){
+    continentFlatPathById = {};
+    continentGlobeGeometryById = {};
+
+    const provincesByContinent = {};
+    baseProvinces.forEach(function(p){
+      const claim = takenIndex[p.label.toUpperCase()] || null;
+      if (claim) return;
+      (provincesByContinent[p.continent] = provincesByContinent[p.continent] || []).push(p);
+    });
+
+    Object.keys(provincesByContinent).forEach(function(continentId){
+      const merged = mergeProvinceGeometry(provincesByContinent[continentId], 'continent ' + continentId);
+      if (merged.flatPath) continentFlatPathById[continentId] = merged.flatPath;
+      if (merged.globeGeometry) continentGlobeGeometryById[continentId] = merged.globeGeometry;
     });
   }
 
@@ -837,27 +892,50 @@
     });
     flatSvg.appendChild(gIslands);
 
-    // Unclaimed provinces: still drawn individually (there's no nation to
-    // merge them into), with the same neutral-per-continent tint as
-    // before but now with a faint outline too, so an empty continent
-    // reads as "open land, subdivided into provinces you could still
-    // claim" rather than a single flat color block.
-    const gProvinces = document.createElementNS(NS, 'g');
+    // Unclaimed land: one solid shape per continent/island (see
+    // buildUnclaimedGeometry()), internal province borders dissolved away
+    // - purely visual, not interactive, so it can't shadow the per-
+    // province hit targets drawn right after it.
+    const gContinents = document.createElementNS(NS, 'g');
+    Object.keys(continentFlatPathById).forEach(function(continentId){
+      const el = document.createElementNS(NS, 'path');
+      el.setAttribute('d', continentFlatPathById[continentId]);
+      el.setAttribute('class', 'nation-province');
+      el.setAttribute('fill', tintForContinent(continentId));
+      el.style.pointerEvents = 'none';
+      gContinents.appendChild(el);
+    });
+    flatSvg.appendChild(gContinents);
+
+    // Falls back to drawing that continent's unclaimed provinces
+    // individually (visually, with a fill instead of transparent) only if
+    // its merge failed for some reason, so land never just disappears.
+    const failedContinents = {};
+    (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
+      if (!continentFlatPathById[c.id]) failedContinents[c.id] = true;
+    });
+
+    // Invisible per-province click/hover targets, drawn on top of the
+    // solid continent fill - keeps "click empty land to see that
+    // province's name/econ/climate" working exactly as before, without
+    // showing its outline. fill="transparent" (not "none") so it still
+    // captures pointer events despite being invisible.
+    const gProvinceHitboxes = document.createElementNS(NS, 'g');
     features.forEach(function(props){
-      if (props.nationName) return; // claimed - drawn as a merged nation shape below instead
+      if (props.nationName) return; // claimed - handled by the nation shape below instead
       const base = baseById[props.id];
       const el = document.createElementNS(NS, 'path');
       el.setAttribute('d', base.d);
-      el.setAttribute('class', 'nation-province unclaimed-province');
-      el.setAttribute('fill', props.color);
+      el.setAttribute('class', 'unclaimed-hitbox');
+      el.setAttribute('fill', failedContinents[base.continent] ? props.color : 'transparent');
       el.dataset.id = props.id;
       el.dataset.nation = '';
       el.addEventListener('click', function(){ selectProvince(props); });
       el.addEventListener('mousemove', function(e){ showMapTooltip(e, props); });
       el.addEventListener('mouseleave', hideTooltip);
-      gProvinces.appendChild(el);
+      gProvinceHitboxes.appendChild(el);
     });
-    flatSvg.appendChild(gProvinces);
+    flatSvg.appendChild(gProvinceHitboxes);
 
     // Claimed provinces: one merged shape per nation, internal province
     // borders dissolved away (see buildNationGeometry()). Falls back to
@@ -1087,13 +1165,41 @@
       globeProvincesGroup = document.createElementNS(NS, 'g');
       globeEls = {};
 
-      // Unclaimed provinces: individually, same as before (no nation to
-      // merge them into).
+      // Unclaimed land: one solid, non-interactive shape per continent/
+      // island (see buildUnclaimedGeometry()), drawn first (bottom of the
+      // stack) - exactly like the flat map.
+      const continentShapeFeatures = [];
+      Object.keys(continentGlobeGeometryById).forEach(function(continentId){
+        continentShapeFeatures.push({
+          id: 'continent:' + continentId, label: continentId,
+          color: tintForContinent(continentId), geometry: continentGlobeGeometryById[continentId],
+        });
+      });
+      const failedContinents = {};
+      (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
+        if (!continentGlobeGeometryById[c.id]) failedContinents[c.id] = true;
+      });
+      continentShapeFeatures.forEach(function(f){
+        const el = document.createElementNS(NS, 'path');
+        el.setAttribute('class', 'nation-province continent-shape');
+        el.setAttribute('fill', f.color);
+        el.dataset.id = f.id;
+        globeEls[f.id] = el;
+        globeProvincesGroup.appendChild(el);
+      });
+
+      // Invisible per-province click/hover targets on top of that solid
+      // fill, same reasoning as the flat map's gProvinceHitboxes - keeps
+      // "click empty land to see that province" working without showing
+      // province outlines. Falls back to a visible fill (instead of
+      // transparent) only for a continent whose merge failed, same
+      // fallback as the flat map, so land never just disappears.
       const unclaimedFeatures = features.filter(function(f){ return !f.nationName && !!f.geometry; });
       unclaimedFeatures.forEach(function(f){
+        const base = baseById[f.id];
         const el = document.createElementNS(NS, 'path');
-        el.setAttribute('class', 'nation-province unclaimed-province');
-        el.setAttribute('fill', f.color);
+        el.setAttribute('class', 'unclaimed-hitbox');
+        el.setAttribute('fill', failedContinents[base.continent] ? f.color : 'transparent');
         el.dataset.id = f.id;
         el.dataset.nation = '';
         el.addEventListener('click', function(){ if (!globeDragMoved) selectProvince(f); });
@@ -1133,7 +1239,7 @@
         globeProvincesGroup.appendChild(el);
       });
 
-      globeFeatures = unclaimedFeatures.concat(nationFeatures);
+      globeFeatures = continentShapeFeatures.concat(unclaimedFeatures, nationFeatures);
       globeSvg.appendChild(globeProvincesGroup);
 
       globeReady = true;
@@ -1239,6 +1345,7 @@
 
     buildFeatures();
     buildNationGeometry();
+    buildUnclaimedGeometry();
     buildFlatMap();
     buildNationLegend();
 
