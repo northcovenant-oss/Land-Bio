@@ -77,16 +77,14 @@
 <script src="data.js"></script>
 <script src="claims.js"></script>
 <!--
-  d3-geo only - not the full d3 bundle. Gives us geoOrthographic,
-  geoPath and geoGraticule; drag-to-rotate and zoom are hand-rolled in
-  globe.js with plain pointer events, so d3-selection/d3-drag aren't
-  needed. This is a pure 2D SVG projection (the same technique used for
-  countless "spinnable globe" choropleths) - no 3D scene, no WebGL, no
-  polygon triangulation library - so there's a much smaller and much
-  better-tested surface for something to go wrong in than the earlier
-  three.js/globe.gl approach had.
+  d3-geo is NOT loaded here with a static <script> tag. globe.js loads it
+  dynamically the first time someone actually opens the Globe view, and
+  tries a couple of different CDNs in turn (jsdelivr, then unpkg, then
+  esm.sh) rather than depending on a single source - a static tag to one
+  CDN has no fallback if that CDN happens to be blocked by a network
+  filter or browser extension, which is a real failure mode that was
+  observed here. See ensureD3() in globe.js.
 -->
-<script src="https://cdn.jsdelivr.net/npm/d3-geo@3"></script>
 <script src="globe.js"></script>
 <script src="theme.js"></script>
 </body>

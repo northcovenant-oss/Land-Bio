@@ -717,14 +717,62 @@
     noDataBanner.classList.add('show');
   }
 
+  // Load d3-geo from a CDN dynamically (rather than a static <script> tag
+  // in globe.html) so a second source can be tried automatically if the
+  // first is unreachable - a single CDN being blocked by a network filter,
+  // extension, or DNS-level ad blocker is a real, observed failure mode
+  // here (this is very likely what silently broke the earlier globe.gl
+  // version too, which loaded from the same CDN). Also means d3 is only
+  // ever fetched if someone actually opens the globe view, not on every
+  // page load.
+  // Deliberately spread across different CDN providers, not just different
+  // URLs on the same one, so one provider being blocked doesn't take out
+  // every entry in the list. The third entry is the full d3 bundle (which
+  // includes d3-geo) from a different CDN entirely (cdnjs/Cloudflare) as a
+  // last resort - it still attaches everything to window.d3, same as the
+  // standalone d3-geo builds.
+  const D3_GEO_SOURCES = [
+    'https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/dist/d3-geo.min.js',
+    'https://unpkg.com/d3-geo@3.1.1/dist/d3-geo.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js',
+  ];
+
+  function loadScriptOnce(src){
+    return new Promise(function(resolve, reject){
+      const el = document.createElement('script');
+      el.src = src;
+      el.onload = function(){ resolve(); };
+      el.onerror = function(){ reject(new Error('could not load ' + src)); };
+      document.head.appendChild(el);
+    });
+  }
+
+  let ensureD3Promise = null;
+  function ensureD3(){
+    if (ensureD3Promise) return ensureD3Promise;
+    if (typeof d3 !== 'undefined' && d3.geoOrthographic){
+      ensureD3Promise = Promise.resolve();
+      return ensureD3Promise;
+    }
+    ensureD3Promise = D3_GEO_SOURCES.reduce(function(chain, src){
+      return chain.catch(function(){ return loadScriptOnce(src); });
+    }, Promise.reject(new Error('no source tried yet')))
+      .then(function(){
+        if (typeof d3 === 'undefined' || !d3.geoOrthographic){
+          throw new Error('a d3-geo script loaded but did not define d3.geoOrthographic (unexpected build)');
+        }
+      })
+      .catch(function(e){
+        throw new Error('d3-geo could not be loaded from any source (' + D3_GEO_SOURCES.length +
+          ' tried) - check your network connection, or whether an ad blocker / content filter is blocking ' +
+          'cdn.jsdelivr.net, unpkg.com or cdnjs.cloudflare.com. Underlying error: ' + e.message);
+      });
+    return ensureD3Promise;
+  }
+
   function buildGlobeView(){
     if (globeBuilt) return;
     globeBuilt = true;
-
-    if (typeof d3 === 'undefined' || !d3.geoOrthographic){
-      handleGlobeFailure(new Error('d3-geo did not load (check your connection / ad blocker)'));
-      return;
-    }
 
     try {
       globeSvg.setAttribute('viewBox', '0 0 ' + GLOBE_VB_SIZE + ' ' + GLOBE_VB_SIZE);
@@ -830,8 +878,17 @@
     flatStage.hidden = true;
     projGlobeBtn.classList.add('active');
     projFlatBtn.classList.remove('active');
-    buildGlobeView();
-    if (!globeReady) globeHasFailedOnce = true;
+    if (globeBuilt) return; // already built (or already failed and fell back)
+    ensureD3()
+      .then(function(){
+        buildGlobeView();
+        if (!globeReady) globeHasFailedOnce = true;
+      })
+      .catch(function(e){
+        globeBuilt = true;
+        globeHasFailedOnce = true;
+        handleGlobeFailure(e);
+      });
   }
   function showFlatView(){
     globeStage.hidden = true;
