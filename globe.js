@@ -695,8 +695,20 @@
 
   let globeSphereEl, globeGraticuleEl, globeProvincesGroup;
 
+  // Separate from globeReady on purpose: globeReady starts out false and
+  // ONLY ever becomes true after a successful build, so a guard of
+  // "if (!globeReady) return" here would silently swallow every failure
+  // that happens before the globe ever finishes initializing (which is
+  // exactly when this fires: d3 missing, or an error partway through
+  // buildGlobeView) - no console warning, no fallback, no banner, just a
+  // permanently blank globe stage. This flag tracks "have we already
+  // reported a failure" instead, independent of whether init ever
+  // succeeded.
+  let globeFailureHandled = false;
+
   function handleGlobeFailure(e){
-    if (!globeReady) return; // already handled
+    if (globeFailureHandled) return; // already reported once, don't spam
+    globeFailureHandled = true;
     globeReady = false;
     console.warn('[Map] Globe rendering failed, switching to the flat map:', e && e.message);
     showFlatView();
@@ -729,6 +741,7 @@
 
       globeSphereEl = document.createElementNS(NS, 'path');
       globeSphereEl.setAttribute('class', 'globe-sphere');
+      globeSphereEl.setAttribute('fill', WATER); // ocean color, same as the flat map's background
       globeSvg.appendChild(globeSphereEl);
 
       globeGraticuleEl = document.createElementNS(NS, 'path');
