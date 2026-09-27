@@ -1132,6 +1132,14 @@
     try {
       globeSphereEl.setAttribute('d', pathGen({ type: 'Sphere' }) || '');
       if (globeGraticuleEl) globeGraticuleEl.setAttribute('d', pathGen(d3.geoGraticule()()) || '');
+      if (globeLandEl){
+        let d = '';
+        globeLandFeatures.forEach(function(f){
+          const seg = pathGen(f.geometry);
+          if (seg) d += seg + ' ';
+        });
+        globeLandEl.setAttribute('d', d);
+      }
       globeFeatures.forEach(function(f){
         const el = globeEls[f.id];
         if (!el) return;
@@ -1149,6 +1157,7 @@
   }
 
   let globeSphereEl, globeGraticuleEl, globeProvincesGroup, globeLimbEl;
+  let globeLandEl = null, globeLandFeatures = [];
 
   // Separate from globeReady on purpose: globeReady starts out false and
   // ONLY ever becomes true after a successful build, so a guard of
@@ -1323,20 +1332,26 @@
       globeGraticuleEl = null; // lat/lon lines don't read well over terrain; omitted here
 
       // Single continuous landmask: every province, claimed or not, drawn
-      // as a solid black silhouette (a mask only - all real color comes
-      // from the terrain filter applied to this whole <g>) and clipped to
-      // the actual coastlines by the filter's final feComposite
-      // operator="in" against SourceGraphic. A matching stroke on each
-      // path closes hairline anti-aliasing seams between neighboring
-      // provinces once the mask is rasterized through the filter.
+      // as ONE solid black silhouette (a mask only - all real color comes
+      // from the terrain filter applied to this <g>), clipped to the
+      // actual coastlines by the filter's final feComposite operator="in"
+      // against SourceGraphic.
+      //
+      // This is one <path> whose 'd' is every province's ring data
+      // concatenated together (fill-rule nonzero unions them), NOT one
+      // <path> per province. Separate adjacent path elements - even with
+      // a matching stroke meant to close the seam between them - can
+      // still show hairline gaps once rasterized through a filter (each
+      // element gets its own independent antialiased edge, and at
+      // certain zoom levels those edges don't fully overlap), which reads
+      // as the whole landmass being "splintered" into its province cells
+      // instead of one cohesive continent. A single path has no seams to
+      // begin with - there's only one edge, the true coastline.
+      globeLandFeatures = landFeatures;
       const landMaskG = svgEl('g', { id: 'globe-landmask', filter: 'url(#globe-terrain)' });
       landMaskG.style.pointerEvents = 'none';
-      landFeatures.forEach(function(f){
-        const p = svgEl('path', { fill: '#000000', stroke: '#000000', 'stroke-width': '1' });
-        landMaskG.appendChild(p);
-        globeEls['land:' + f.id] = p;
-        globeFeatures.push({ id: 'land:' + f.id, geometry: f.geometry });
-      });
+      globeLandEl = svgEl('path', { fill: '#000000', 'fill-rule': 'nonzero' });
+      landMaskG.appendChild(globeLandEl);
       globeSvg.appendChild(landMaskG);
 
       // Invisible per-province click/hover targets on top of the terrain -
