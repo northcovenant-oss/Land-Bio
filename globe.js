@@ -65,18 +65,31 @@
 
   const [VB_X, VB_Y, VB_W, VB_H] = VIEWBOX.split(' ').map(Number);
 
-  function getPathPoints(d){
+  // Returns an ARRAY OF RINGS (one per M...Z subpath), not one flat point
+  // list. Some province paths are archipelago-style - a mainland plus
+  // several separate island subpaths in the same 'd' string (one province
+  // has as many as 30 'M' commands) - and earlier this function silently
+  // concatenated every subpath into a single ring. That drew a phantom
+  // straight edge from the end of one island to the start of the next,
+  // producing a huge, self-intersecting "bowtie" polygon spanning tens of
+  // degrees instead of the province's real, small footprint. On the flat
+  // map that's harmless (SVG just fills each subpath of the native 'd'
+  // independently), but for the globe every subpath needs to become its
+  // own polygon ring (a GeoJSON MultiPolygon), or the geometry is wrong.
+  function getPathSubrings(d){
     const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|-?\d*\.?\d+(?:e-?\d+)?/g);
     if(!tokens) return [];
     let i=0, cmd=null, cx=0, cy=0, sx=0, sy=0;
-    const pts = [];
+    const rings = [];
+    let pts = null;
     function num(){ return parseFloat(tokens[i++]); }
+    function startRing(){ if (pts && pts.length) rings.push(pts); pts = []; }
     while(i < tokens.length){
       const t = tokens[i];
       if(/[MmLlHhVvCcSsQqTtAaZz]/.test(t)){ cmd = t; i++; }
       switch(cmd){
-        case 'M': cx=num(); cy=num(); sx=cx; sy=cy; pts.push([cx,cy]); cmd='L'; break;
-        case 'm': cx+=num(); cy+=num(); sx=cx; sy=cy; pts.push([cx,cy]); cmd='l'; break;
+        case 'M': startRing(); cx=num(); cy=num(); sx=cx; sy=cy; pts.push([cx,cy]); cmd='L'; break;
+        case 'm': startRing(); cx+=num(); cy+=num(); sx=cx; sy=cy; pts.push([cx,cy]); cmd='l'; break;
         case 'L': cx=num(); cy=num(); pts.push([cx,cy]); break;
         case 'l': cx+=num(); cy+=num(); pts.push([cx,cy]); break;
         case 'H': cx=num(); pts.push([cx,cy]); break;
@@ -100,7 +113,8 @@
         default: i++;
       }
     }
-    return pts;
+    if (pts && pts.length) rings.push(pts);
+    return rings;
   }
 
   function toLonLat(x, y){
@@ -145,15 +159,41 @@
     const simplified = rdp(points);
     return simplified.length >= 3 ? simplified : points;
   }
+
+  // A ring is only usable as a GeoJSON polygon ring if it has at least 4
+  // points (3 distinct corners + the closing repeat) and every coordinate
+  // is a finite number. Guards against ever handing three-globe/earcut a
+  // degenerate or NaN ring, which is the kind of input most likely to
+  // break its triangulation in ways that are very hard to diagnose from
+  // outside a real browser.
+  function isUsableRing(ring){
+    if (!ring || ring.length < 4) return false;
+    for (let i = 0; i < ring.length; i++){
+      const pt = ring[i];
+      if (!pt || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return false;
+    }
+    return true;
+  }
   // In lon/lat degrees. Tuned against the real data: cuts ~105k points to
   // ~14.5k (avg ~12/province, worst case ~140) while keeping province
   // shapes clearly recognizable at any globe zoom level.
   const GLOBE_SIMPLIFY_TOLERANCE = 0.2;
 
   // Base geometry, independent of who's claimed what - built once.
+  // "rings" holds one ring per subpath in the source 'd' (almost always
+  // just one; archipelago-style provinces have several). "globeRings" is
+  // the same, each independently simplified for the globe and filtered
+  // down to only the rings that are actually usable polygon geometry -
+  // this is what keeps a stray degenerate subpath in one province from
+  // ever reaching three-globe at all.
   const baseProvinces = PROVINCES.map(function(p){
-    const pts = getPathPoints(p.d);
-    const ring = pts.map(function(pt){ return toLonLat(pt[0], pt[1]); });
+    const subpaths = getPathSubrings(p.d);
+    const rings = subpaths.map(function(pts){
+      return pts.map(function(pt){ return toLonLat(pt[0], pt[1]); });
+    });
+    const globeRings = rings
+      .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
+      .filter(isUsableRing);
     return {
       id: p.id,
       label: p.label,
@@ -161,8 +201,8 @@
       climate: p.climate ? (p.climate.display || p.climate.dominant) : null,
       d: p.d,
       continent: p.continent,
-      ring: ring,
-      globeRing: simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE),
+      rings: rings,
+      globeRings: globeRings,
     };
   });
   const baseById = {};
@@ -184,9 +224,15 @@
   // continents read as distinct landmasses even where nobody's claimed
   // anything yet. Claimed provinces always use their nation's full-color
   // instead of this.
+  // Offset the starting hue away from 0: with the golden-angle spacing
+  // alone, the very first continent in CONTINENTS always lands on hue 0,
+  // which at this low saturation/high lightness renders as a visibly pink
+  // tone rather than a neutral one - easy to mistake for a rendering bug
+  // ("the globe is pink!") rather than what it actually is, a color choice.
+  const CONTINENT_HUE_OFFSET = 200;
   const continentTint = {};
   (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c, i){
-    continentTint[c.id] = 'hsl(' + ((i * GOLDEN_ANGLE) % 360).toFixed(1) + ', 22%, 68%)';
+    continentTint[c.id] = 'hsl(' + ((CONTINENT_HUE_OFFSET + i * GOLDEN_ANGLE) % 360).toFixed(1) + ', 22%, 68%)';
   });
   function tintForContinent(continentId){
     return continentTint[continentId] || NEUTRAL_HEX;
@@ -201,20 +247,36 @@
   let features = [];         // colored GeoJSON-ish features, rebuilt once claims resolve
 
   function buildFeatures(){
-    features = baseProvinces.map(function(p){
-      const claim = takenIndex[p.label.toUpperCase()] || null;
-      const nationName = claim ? claim.name : null;
-      const color = nationName ? (nationColor[nationName] || NEUTRAL_HEX) : tintForContinent(p.continent);
-      const isCapital = !!(claim && claim.capital && claim.capital.toUpperCase() === p.label.toUpperCase());
-      return {
-        type: 'Feature',
-        properties: {
-          id: p.id, label: p.label, econ: p.econ, climate: p.climate,
-          nationName: nationName, isCapital: isCapital, color: color,
-        },
-        geometry: { type: 'Polygon', coordinates: [ p.globeRing ] },
-      };
-    });
+    features = baseProvinces
+      // A province only ever loses ALL of its rings if every subpath in its
+      // source data was degenerate (see isUsableRing) - vanishingly rare,
+      // but such a province has no valid geometry to give the globe at all,
+      // so it's left out rather than passed through as broken input.
+      .filter(function(p){ return p.globeRings.length > 0; })
+      .map(function(p){
+        const claim = takenIndex[p.label.toUpperCase()] || null;
+        const nationName = claim ? claim.name : null;
+        const color = nationName ? (nationColor[nationName] || NEUTRAL_HEX) : tintForContinent(p.continent);
+        const isCapital = !!(claim && claim.capital && claim.capital.toUpperCase() === p.label.toUpperCase());
+        // Multiple usable rings (an archipelago-style province) -> a real
+        // GeoJSON MultiPolygon, one polygon per island/subpath. A single
+        // ring -> a plain Polygon. Either way every ring here is one
+        // complete, independent, closed loop - never several subpaths
+        // stitched together into one (that was the source of the huge,
+        // self-intersecting "bowtie" shapes some provinces used to render
+        // as on the globe).
+        const geometry = p.globeRings.length > 1
+          ? { type: 'MultiPolygon', coordinates: p.globeRings.map(function(r){ return [r]; }) }
+          : { type: 'Polygon', coordinates: [ p.globeRings[0] ] };
+        return {
+          type: 'Feature',
+          properties: {
+            id: p.id, label: p.label, econ: p.econ, climate: p.climate,
+            nationName: nationName, isCapital: isCapital, color: color,
+          },
+          geometry: geometry,
+        };
+      });
   }
 
   // =========================================================================
@@ -485,6 +547,28 @@
   // =========================================================================
 
   let globeInstance = null;
+  let globeFailed = false;
+
+  // Safety net: three-globe rebuilds all 1200 polygon meshes on the next
+  // animation frame after .polygonsData() is set (that update is debounced,
+  // not synchronous), so a bad geometry can throw from inside a browser
+  // render callback we have no try/catch around. If that happens the globe
+  // silently stops rendering with no visible error, which is exactly the
+  // "blank/wrong-looking globe, no idea why" situation this page was stuck
+  // in before. This listener can't fix that crash, but it makes sure it's
+  // never silent again: it falls back to the flat map (which uses none of
+  // this rendering path and is known-good) and prints the real error text
+  // into the on-page banner so it can be read off and reported, instead of
+  // requiring the browser dev console.
+  window.addEventListener('error', function(e){
+    if (globeFailed) return;
+    if (globeStage.hidden) return; // only care while the globe is the active view
+    globeFailed = true;
+    showFlatView();
+    noDataBanner.textContent = 'The 3D globe hit a rendering error and has been switched to the flat map instead. Error: ' +
+      (e && e.message ? e.message : 'unknown error');
+    noDataBanner.classList.add('show');
+  });
 
   function initGlobe(){
     if (globeInstance || typeof Globe !== 'function') return;
@@ -509,7 +593,15 @@
       // No per-province stroke here either - same reasoning as globe.css:
       // same-nation neighbors share one fill color, so leaving the grid
       // of province outlines off makes each nation read as one region.
-      .polygonStrokeColor(function(){ return 'rgba(0,0,0,0)'; })
+      // IMPORTANT: this must be a falsy value, not a "transparent" color
+      // string - three-globe checks `!!polygonStrokeColor(f)` to decide
+      // whether to build a stroke line at all, so a string like
+      // 'rgba(0,0,0,0)' is still truthy and was silently forcing it to
+      // build a whole extra stroke-line geometry (a second, independent
+      // triangulation-adjacent code path) for every one of the 1200
+      // polygons, just to render it invisibly. Passing null skips that
+      // work entirely instead of hiding it.
+      .polygonStrokeColor(function(){ return null; })
       .polygonAltitude(function(f){ return f.properties.nationName ? 0.008 : 0.004; })
       .polygonLabel(function(f){
         return '<div style="font-family: sans-serif; padding:2px 4px;">' +
@@ -542,7 +634,9 @@
   function averageLonLat(){
     let sLon = 0, sLat = 0, n = 0;
     baseProvinces.forEach(function(p){
-      p.ring.forEach(function(pt){ sLon += pt[0]; sLat += pt[1]; n++; });
+      p.rings.forEach(function(ring){
+        ring.forEach(function(pt){ sLon += pt[0]; sLat += pt[1]; n++; });
+      });
     });
     return n ? { lon: sLon/n, lat: sLat/n } : { lon: 0, lat: 0 };
   }
@@ -670,12 +764,25 @@
   const projFlatBtn = document.getElementById('projFlatBtn');
 
   function showGlobeView(){
+    if (globeFailed){
+      // Already fell back once this session (see the window 'error'
+      // listener above) - don't flip back into the broken view.
+      showFlatView();
+      return;
+    }
     globeStage.hidden = false;
     flatStage.hidden = true;
     projGlobeBtn.classList.add('active');
     projFlatBtn.classList.remove('active');
-    initGlobe();
-    resizeGlobe();
+    try {
+      initGlobe();
+      resizeGlobe();
+    } catch (e){
+      globeFailed = true;
+      showFlatView();
+      noDataBanner.textContent = 'The 3D globe failed to load and has been switched to the flat map instead. Error: ' + e.message;
+      noDataBanner.classList.add('show');
+    }
   }
   function showFlatView(){
     globeStage.hidden = true;
