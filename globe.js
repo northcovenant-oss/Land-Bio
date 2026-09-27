@@ -39,7 +39,6 @@
   const mapFrame = document.getElementById('mapFrame');
   const tooltip = document.getElementById('tooltip');
   const noDataBanner = document.getElementById('noDataBanner');
-  const nationLegend = document.getElementById('nationLegend');
   const globeStage = document.getElementById('globeStage');
   const globeSvg = document.getElementById('globeSvg');
   const flatStage = document.getElementById('flatStage');
@@ -839,29 +838,6 @@
     });
   }
 
-  // =========================================================================
-  // 5. Nation legend
-  // =========================================================================
-
-  function buildNationLegend(){
-    const names = Object.keys(claimsByName).sort();
-    nationLegend.innerHTML = '';
-    if (!names.length){
-      nationLegend.classList.remove('show');
-      return;
-    }
-    names.forEach(function(name){
-      const row = document.createElement('div');
-      row.className = 'legend-row';
-      row.innerHTML = '<span class="legend-swatch" style="background:' + nationColor[name] + '"></span>' +
-        '<span class="legend-label">' + escapeHtml(name) + '</span>';
-      row.style.cursor = 'pointer';
-      row.addEventListener('click', function(){ selectedNationName = name; renderNationPanel(name); applySelectionHighlight(); });
-      nationLegend.appendChild(row);
-    });
-    nationLegend.classList.add('show');
-  }
-
   function showMapTooltip(e, props){
     const rect = mapFrame.getBoundingClientRect();
     // Unclaimed land is now one solid shape per continent/island with no
@@ -1100,6 +1076,21 @@
     }
     return ((h >>> 8) % 16777216) / 16777216;
   }
+  // A second hash, statistically independent of elevationBias() above
+  // (different salt, so a province with a high elevationBias has no
+  // tendency toward a high speckleBias too). Used to gate the highland/
+  // peak masks: multiplying it into a broad blurred elevation field only
+  // lets a scattered subset of an otherwise-uniform "high" region through,
+  // instead of the whole region lighting up as one solid shape.
+  function speckleBias(provinceId){
+    let h = 2166136261;
+    const s = 'speck:' + provinceId;
+    for (let i = 0; i < s.length; i++){
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return ((h >>> 8) % 16777216) / 16777216;
+  }
   function svgEl(tag, attrs){
     const node = document.createElementNS(NS, tag);
     if (attrs) Object.keys(attrs).forEach(function(k){ node.setAttribute(k, attrs[k]); });
@@ -1327,6 +1318,7 @@
     // globe rotates/zooms, instead of sliding independently of it.
     const biasfieldG = svgEl('g', { id: 'globe-biasfield' });
     const elevfieldG = svgEl('g', { id: 'globe-elevfield' });
+    const speckfieldG = svgEl('g', { id: 'globe-speckfield' });
     landFeatures.forEach(function(f){
       const climGray = Math.round(climateBias(f.climate) * 255);
       const climP = svgEl('path', { fill: 'rgb(' + climGray + ',' + climGray + ',' + climGray + ')' });
@@ -1339,9 +1331,16 @@
       elevfieldG.appendChild(elevP);
       globeEls['elev:' + f.id] = elevP;
       globeFeatures.push({ id: 'elev:' + f.id, geometry: f.geometry });
+
+      const speckGrayVal = Math.round(speckleBias(f.id) * 255);
+      const speckP = svgEl('path', { fill: 'rgb(' + speckGrayVal + ',' + speckGrayVal + ',' + speckGrayVal + ')' });
+      speckfieldG.appendChild(speckP);
+      globeEls['speck:' + f.id] = speckP;
+      globeFeatures.push({ id: 'speck:' + f.id, geometry: f.geometry });
     });
     defs.appendChild(biasfieldG);
     defs.appendChild(elevfieldG);
+    defs.appendChild(speckfieldG);
 
     // Procedural terrain filter (ported from the "satellite physical map"
     // appearance study, then reworked to sample elevation from the
@@ -1384,25 +1383,95 @@
     terrain.appendChild(reliefSoft);
     terrain.appendChild(svgEl('feBlend', { in: 'elevRampSoft', in2: 'reliefSoft', mode: 'multiply', result: 'shadedTerrain' }));
 
-    const elevContrast = svgEl('feComponentTransfer', { in: 'elevGray', result: 'elevContrast' });
-    elevContrast.appendChild(svgEl('feFuncR', { type: 'linear', slope: '2.4', intercept: '-0.7' }));
-    elevContrast.appendChild(svgEl('feFuncG', { type: 'linear', slope: '2.4', intercept: '-0.7' }));
-    elevContrast.appendChild(svgEl('feFuncB', { type: 'linear', slope: '2.4', intercept: '-0.7' }));
+    // Highland/peak masks below read 'elevNoise' (the FINER of the two
+    // blurred elevation passes, stdDeviation 8), not the broader 'elevGray'
+    // (stdDeviation 20) the color ramp uses. The wide blur that makes a
+    // good smooth base color ramp also means a few provinces hashing high
+    // next to each other produces one broad, smoothly-domed peak - and a
+    // steep gamma curve turns the whole flat top of that dome solid white
+    // at once, showing up as a stark, oversized white blob rather than a
+    // scattered mountain range. Reading the less-blurred field instead
+    // keeps the same peaks rarer and smaller/more textured.
+    const elevContrast = svgEl('feComponentTransfer', { in: 'elevNoise', result: 'elevContrast' });
+    elevContrast.appendChild(svgEl('feFuncR', { type: 'linear', slope: '2.0', intercept: '-0.6' }));
+    elevContrast.appendChild(svgEl('feFuncG', { type: 'linear', slope: '2.0', intercept: '-0.6' }));
+    elevContrast.appendChild(svgEl('feFuncB', { type: 'linear', slope: '2.0', intercept: '-0.6' }));
     terrain.appendChild(elevContrast);
 
-    const greyMask = svgEl('feComponentTransfer', { in: 'elevContrast', result: 'greyMask' });
-    greyMask.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
-    greyMask.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
-    greyMask.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
-    terrain.appendChild(greyMask);
+    // A second hashed field (speckleBias() above), independent of the
+    // elevation hash, lightly blurred so it stays fine-grained instead of
+    // settling into the same broad shapes elevation does. Multiplying it
+    // into the highland/cap masks below breaks a wide "high on average"
+    // elevation region up into a scatter of small peaks instead of
+    // letting the whole region light up as one solid shape.
+    terrain.appendChild(svgEl('feImage', { href: '#globe-speckfield', x: '0', y: '0', width: String(GLOBE_VB_SIZE), height: String(GLOBE_VB_SIZE), result: 'speckFieldImg' }));
+    terrain.appendChild(svgEl('feColorMatrix', { in: 'speckFieldImg', type: 'matrix', values: '0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1', result: 'speckFieldGray' }));
+    terrain.appendChild(svgEl('feGaussianBlur', { in: 'speckFieldGray', stdDeviation: '2.5', result: 'elevSpeckle' }));
+    const speckleContrast = svgEl('feComponentTransfer', { in: 'elevSpeckle', result: 'speckleContrast' });
+    speckleContrast.appendChild(svgEl('feFuncR', { type: 'linear', slope: '2.6', intercept: '-0.8' }));
+    speckleContrast.appendChild(svgEl('feFuncG', { type: 'linear', slope: '2.6', intercept: '-0.8' }));
+    speckleContrast.appendChild(svgEl('feFuncB', { type: 'linear', slope: '2.6', intercept: '-0.8' }));
+    terrain.appendChild(speckleContrast);
+
+    terrain.appendChild(svgEl('feComposite', { in: 'elevContrast', in2: 'speckleContrast', operator: 'arithmetic', k1: '1', k2: '0', k3: '0', k4: '0', result: 'elevSpeckled' }));
+
+    // A texture multiplier built from 'elevNoise' (the finer of the two
+    // blurred elevation passes) - without this, the highland/cap masks
+    // below are smooth gradients from smooth blurred fields, so even a
+    // softened, partially-transparent one still reads as a flat painted
+    // patch rather than real terrain. Multiplying it into each mask's
+    // alpha carves faint ridges/fissures into the cap itself, matching
+    // the same texture already visible in the hillshading underneath.
+    const capTexture = svgEl('feComponentTransfer', { in: 'elevNoise', result: 'capTexture' });
+    capTexture.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.7', intercept: '0.35' }));
+    capTexture.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.7', intercept: '0.35' }));
+    capTexture.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.7', intercept: '0.35' }));
+    terrain.appendChild(capTexture);
+
+    const greyMaskRaw = svgEl('feComponentTransfer', { in: 'elevSpeckled', result: 'greyMaskRaw' });
+    greyMaskRaw.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+    greyMaskRaw.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+    greyMaskRaw.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+    terrain.appendChild(greyMaskRaw);
+    // Capped the same way as the white mask below - left uncapped, this
+    // mask could reach full (opaque) alpha across a whole blurred-high
+    // region, which combined with the white cap layered on top of it is
+    // what actually read as a stark, solid blob rather than two softer,
+    // partially-transparent highland/peak layers blending into the shaded
+    // terrain underneath.
+    const greyMaskLinear = svgEl('feComponentTransfer', { in: 'greyMaskRaw', result: 'greyMaskLinear' });
+    greyMaskLinear.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.35', intercept: '0' }));
+    greyMaskLinear.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.35', intercept: '0' }));
+    greyMaskLinear.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.35', intercept: '0' }));
+    terrain.appendChild(greyMaskLinear);
+    terrain.appendChild(svgEl('feComposite', { in: 'greyMaskLinear', in2: 'capTexture', operator: 'arithmetic', k1: '1', k2: '0', k3: '0', k4: '0', result: 'greyMask' }));
     terrain.appendChild(svgEl('feColorMatrix', { in: 'greyMask', type: 'matrix', values: '0 0 0 0 0.56  0 0 0 0 0.57  0 0 0 0 0.58  1 0 0 0 0', result: 'greyLayer' }));
     terrain.appendChild(svgEl('feComposite', { in: 'greyLayer', in2: 'shadedTerrain', operator: 'over', result: 'withGrey' }));
 
-    const whiteMask = svgEl('feComponentTransfer', { in: 'elevContrast', result: 'whiteMask' });
-    whiteMask.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '9', offset: '0' }));
-    whiteMask.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '9', offset: '0' }));
-    whiteMask.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '9', offset: '0' }));
+    // A per-province hashed elevation field (see elevationBias() above),
+    // heavily blurred, occasionally has a cluster of neighboring
+    // provinces all land on high values by chance - that reads fine for
+    // the grey highland band, but a steep gamma curve on its own turns
+    // the whole flat top of a cluster like that solid white at once,
+    // showing up as a stark, oversized blob instead of a snowcap. The
+    // elevSpeckled multiply above already breaks that up some; on top of
+    // it, a high gamma exponent makes the threshold rarer and smaller,
+    // an extra blur on the mask itself softens its edge instead of
+    // cutting sharply, and capping the mask's peak value well below 1
+    // keeps even its brightest point a highlight over the terrain rather
+    // than a flat white pool.
+    const whiteMask = svgEl('feComponentTransfer', { in: 'elevSpeckled', result: 'whiteMaskRaw' });
+    whiteMask.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '20', offset: '0' }));
+    whiteMask.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '20', offset: '0' }));
+    whiteMask.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '20', offset: '0' }));
     terrain.appendChild(whiteMask);
+    terrain.appendChild(svgEl('feGaussianBlur', { in: 'whiteMaskRaw', stdDeviation: '5', result: 'whiteMaskSoft' }));
+    const whiteMaskCapped = svgEl('feComponentTransfer', { in: 'whiteMaskSoft', result: 'whiteMaskCapped' });
+    whiteMaskCapped.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.22', intercept: '0' }));
+    whiteMaskCapped.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.22', intercept: '0' }));
+    whiteMaskCapped.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.22', intercept: '0' }));
+    terrain.appendChild(whiteMaskCapped);
+    terrain.appendChild(svgEl('feComposite', { in: 'whiteMaskCapped', in2: 'capTexture', operator: 'arithmetic', k1: '1', k2: '0', k3: '0', k4: '0', result: 'whiteMask' }));
     terrain.appendChild(svgEl('feColorMatrix', { in: 'whiteMask', type: 'matrix', values: '0 0 0 0 0.97  0 0 0 0 0.97  0 0 0 0 0.95  1 0 0 0 0', result: 'whiteLayer' }));
     terrain.appendChild(svgEl('feComposite', { in: 'whiteLayer', in2: 'withGrey', operator: 'over', result: 'withCaps' }));
 
@@ -1757,7 +1826,6 @@
     buildNationGeometry();
     buildUnclaimedGeometry();
     buildFlatMap();
-    buildNationLegend();
 
     if (!claims.length){
       noDataBanner.textContent = 'No claims found yet - every province is shown as unclaimed.';

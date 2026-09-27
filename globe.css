@@ -246,5 +246,3 @@ path.nation-border.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   border: 1px dashed var(--line);
   border-radius: 4px;
 }
-
-.nation-legend .legend-swatch{ border-radius: 50%; }
