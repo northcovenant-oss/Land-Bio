@@ -95,9 +95,53 @@
     return [ (x / VB_W) * 360 - 180, 90 - (y / VB_H) * 180 ];
   }
 
+  // Ramer-Douglas-Peucker line simplification. Used ONLY for the globe's
+  // polygon geometry, never for the flat map (which reuses the original
+  // 'd' path directly, at full detail, exactly like index.html).
+  //
+  // Why this exists: this world's 1200 provinces have ~105,000 boundary
+  // points between them (one province alone has 2849). That level of
+  // coastline detail is invisible at globe zoom, but three-globe still has
+  // to triangulate all of it into an extruded 3D solid (cap + side walls +
+  // stroke) for every polygon. Simplifying first cuts that to ~14,500
+  // points (~7x less) with no visible difference on a sphere, and is the
+  // main fix for the globe view being slow to load.
+  function perpDist(pt, a, b){
+    const dx = b[0]-a[0], dy = b[1]-a[1];
+    const len2 = dx*dx + dy*dy;
+    if (len2 === 0) return Math.hypot(pt[0]-a[0], pt[1]-a[1]);
+    let t = ((pt[0]-a[0])*dx + (pt[1]-a[1])*dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(pt[0] - (a[0]+t*dx), pt[1] - (a[1]+t*dy));
+  }
+  function simplifyRing(points, eps){
+    if (points.length < 4) return points.slice();
+    function rdp(pts){
+      if (pts.length < 3) return pts;
+      let maxD = 0, idx = 0;
+      for (let i = 1; i < pts.length - 1; i++){
+        const d = perpDist(pts[i], pts[0], pts[pts.length-1]);
+        if (d > maxD){ maxD = d; idx = i; }
+      }
+      if (maxD > eps){
+        const left = rdp(pts.slice(0, idx+1));
+        const right = rdp(pts.slice(idx));
+        return left.slice(0, -1).concat(right);
+      }
+      return [pts[0], pts[pts.length-1]];
+    }
+    const simplified = rdp(points);
+    return simplified.length >= 3 ? simplified : points;
+  }
+  // In lon/lat degrees. Tuned against the real data: cuts ~105k points to
+  // ~14.5k (avg ~12/province, worst case ~140) while keeping province
+  // shapes clearly recognizable at any globe zoom level.
+  const GLOBE_SIMPLIFY_TOLERANCE = 0.2;
+
   // Base geometry, independent of who's claimed what - built once.
   const baseProvinces = PROVINCES.map(function(p){
     const pts = getPathPoints(p.d);
+    const ring = pts.map(function(pt){ return toLonLat(pt[0], pt[1]); });
     return {
       id: p.id,
       label: p.label,
@@ -105,7 +149,8 @@
       climate: p.climate ? (p.climate.display || p.climate.dominant) : null,
       d: p.d,
       continent: p.continent,
-      ring: pts.map(function(pt){ return toLonLat(pt[0], pt[1]); }),
+      ring: ring,
+      globeRing: simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE),
     };
   });
   const baseById = {};
@@ -142,7 +187,7 @@
           id: p.id, label: p.label, econ: p.econ, climate: p.climate,
           nationName: nationName, isCapital: isCapital, color: color,
         },
-        geometry: { type: 'Polygon', coordinates: [ p.ring ] },
+        geometry: { type: 'Polygon', coordinates: [ p.globeRing ] },
       };
     });
   }
@@ -370,22 +415,19 @@
   }
 
   function applySelectionHighlight(){
-    // Flat map: toggle a class on every path belonging to the selected nation.
+    // Flat map: toggle a class on every path belonging to the selected
+    // nation - cheap (just a CSS class swap on existing <path> elements,
+    // no geometry work).
     Array.from(flatSvg.querySelectorAll('.nation-province')).forEach(function(el){
       el.classList.toggle('picked', !!selectedNationName && el.dataset.nation === selectedNationName);
     });
-    // Globe: bump altitude/stroke for the selected nation's polygons.
-    if (globeInstance){
-      globeInstance
-        .polygonAltitude(function(f){
-          if (selectedNationName && f.properties.nationName === selectedNationName) return 0.02;
-          return f.properties.nationName ? 0.008 : 0.004;
-        })
-        .polygonStrokeColor(function(f){
-          if (selectedNationName && f.properties.nationName === selectedNationName) return '#e0a83e';
-          return 'rgba(20,20,20,0.55)';
-        });
-    }
+    // Deliberately NOT re-highlighting on the globe itself: calling
+    // .polygonAltitude()/.polygonStrokeColor() again re-triangulates every
+    // polygon's 3D geometry (cap + side walls) for all 1200 provinces, not
+    // just the changed ones - with this dataset's ~14,500 (post-simplify)
+    // boundary points, that was the actual cause of "unresponsive" clicks.
+    // The info panel + flat-map highlight already show the selection;
+    // hovering a province still shows its own label/tooltip on the globe.
   }
 
   // =========================================================================
