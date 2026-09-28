@@ -51,20 +51,28 @@
   // property (style.css) instead of a fixed constant, so switching themes
   // recolors the water immediately, everywhere it's used, without this
   // file needing to know each theme's color itself.
+  // A single-ink, monochrome-sepia look: water and unclaimed land both
+  // brown, distinguished only by tone (land a shade darker/richer, water a
+  // lighter wash) the way a hand-tinted or single-color-ink antique chart
+  // reads - not two different hues.
+  const PARCHMENT_LAND_BROWN = '#b89a6e';
+  const PARCHMENT_WATER_BROWN = '#c9b58a';
+
   function currentWaterColor(){
     const theme = currentThemeName();
-    // Parchment and Relief both keep the original map's fixed ocean/lake
-    // color (the same WATER every other page on the site uses - see
-    // map.js's own copy of this constant) rather than pulling from
-    // --water. Relief's theme block in style.css deliberately copies
-    // Modern's chrome variables wholesale (buttons, panels, accent color -
-    // see that block's own comment), which includes --water; left
-    // unhandled here, that made Relief's flat map ocean render in the
-    // exact same blue as Modern's, so its flat map read as just Modern
-    // under a different name instead of its own look. Only Modern (whose
-    // whole point is "blue water, white continents") and Dark Mode (whose
-    // --water is deliberately a darker, near-black-compatible tone, not a
-    // copy of anything) actually need their own --water value here.
+    if (theme === 'parchment') return PARCHMENT_WATER_BROWN;
+    // Relief keeps the original map's fixed ocean/lake color (the same
+    // WATER every other page on the site uses - see map.js's own copy of
+    // this constant) rather than pulling from --water. Relief's theme
+    // block in style.css deliberately copies Modern's chrome variables
+    // wholesale (buttons, panels, accent color - see that block's own
+    // comment), which includes --water; left unhandled here, that made
+    // Relief's flat map ocean render in the exact same blue as Modern's,
+    // so its flat map read as just Modern under a different name instead
+    // of its own look. Only Modern (whose whole point is "blue water,
+    // white continents") and Dark Mode (whose --water is deliberately a
+    // darker, near-black-compatible tone, not a copy of anything)
+    // actually need their own --water value here.
     if (theme === 'modern' || theme === 'dark'){
       try {
         const v = getComputedStyle(document.body).getPropertyValue('--water').trim();
@@ -82,9 +90,12 @@
   // instead of an unbounded rainbow they each cycle through a small, fixed
   // set of colors hand-picked to sit well on that theme's own palette.
   const THEME_NATION_PALETTES = {
-    // Antique-cartography ink colors, sitting comfortably next to Parchment's
-    // gold/seal-red chrome.
-    parchment: ['#8a5a2b', '#5c7a4a', '#6b4c7a', '#8a3a3a'],
+    // All-sepia set: four shades of brown (dark chestnut, ochre/mustard,
+    // near-black espresso, caramel), spread across lightness/saturation
+    // rather than hue so nations still read apart from each other and
+    // from the lighter land/water browns around them, without breaking
+    // the single-ink antique-chart look.
+    parchment: ['#5c3620', '#8a6a2e', '#3f2e22', '#a5763f'],
     // Relief reuses Modern's blue/red chrome (see its comment in style.css)
     // but its map itself is mostly green/brown terrain and blue ocean, so
     // its palette leans on saturated, high-contrast accents that still read
@@ -337,7 +348,14 @@
     // Modern's whole point is "white continents, blue ocean" - unclaimed
     // land there is flat white rather than the muted per-continent tint
     // the other themes use.
-    if (currentThemeName() === 'modern') return '#ffffff';
+    const theme = currentThemeName();
+    if (theme === 'modern') return '#ffffff';
+    // Parchment's whole sheet reads as one ink color - every continent
+    // (and island - see buildFlatMap()'s gIslands, which also calls this)
+    // gets the exact same brown rather than a different muted hue apiece,
+    // so land only ever separates from land by an ownership color, never
+    // by which landmass it happens to be.
+    if (theme === 'parchment') return PARCHMENT_LAND_BROWN;
     return continentTint[continentId] || NEUTRAL_HEX;
   }
 
