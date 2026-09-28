@@ -999,9 +999,139 @@
   const LAKE_LIST = (typeof LAKES !== 'undefined') ? LAKES : [];
   const ISLAND_LIST = (typeof EXTRA_ISLANDS !== 'undefined') ? EXTRA_ISLANDS : [];
 
+  // ---- Parchment-only chart dressing: rhumb lines + aged-paper overlay ----
+  // Portolan-chart flourishes, built once and simply hidden/shown on theme
+  // switch (see repaintOwnershipColors below) rather than rebuilt, since
+  // they don't depend on ownership data at all.
+  let rhumbLinesGroup = null;
+  let paperTextureGroup = null;
+  const INK = '#5a2a1e'; // faded iron-gall-ink brown, not flat black
+
+  // A handful of compass roses scattered across the sheet, each spraying
+  // straight rhumb lines the way a 15th/16th-century portolan chart does -
+  // navigators laid their course against the nearest rose's lines rather
+  // than a lat/lon grid. Drawn as the very first thing in the SVG so every
+  // landmass paints over it; only the open water ends up showing lines,
+  // same as on a real one.
+  function buildRhumbLines(){
+    const g = svgEl('g', { class: 'rhumb-lines' });
+    g.style.pointerEvents = 'none';
+    const focalPoints = [
+      { x: VB_X + VB_W * 0.50, y: VB_Y + VB_H * 0.50 },
+      { x: VB_X + VB_W * 0.10, y: VB_Y + VB_H * 0.12 },
+      { x: VB_X + VB_W * 0.90, y: VB_Y + VB_H * 0.12 },
+      { x: VB_X + VB_W * 0.10, y: VB_Y + VB_H * 0.88 },
+      { x: VB_X + VB_W * 0.90, y: VB_Y + VB_H * 0.88 },
+      { x: VB_X + VB_W * 0.50, y: VB_Y + VB_H * 0.06 },
+      { x: VB_X + VB_W * 0.50, y: VB_Y + VB_H * 0.94 },
+    ];
+    const reach = Math.max(VB_W, VB_H) * 1.5; // long enough to run off any edge from any focal point
+    focalPoints.forEach(function(fp){
+      // 32-point compass: a line every 11.25 degrees, with the 8 main
+      // points drawn heavier/darker than the 24 half/quarter points -
+      // the same weighting real rose networks use so the chart doesn't
+      // read as a uniform starburst.
+      for (let deg = 0; deg < 360; deg += 11.25){
+        const rad = deg * Math.PI / 180;
+        const isMain = Math.abs((deg / 45) - Math.round(deg / 45)) < 1e-6;
+        const line = svgEl('line', {
+          x1: fp.x.toFixed(1), y1: fp.y.toFixed(1),
+          x2: (fp.x + Math.cos(rad) * reach).toFixed(1),
+          y2: (fp.y + Math.sin(rad) * reach).toFixed(1),
+          stroke: INK,
+          'stroke-width': isMain ? '1.1' : '0.45',
+          opacity: isMain ? '0.30' : '0.15',
+        });
+        g.appendChild(line);
+      }
+      // Small ring marking the rose's own center, plus a tighter 8-point
+      // star so the focal points read as deliberate roses instead of
+      // arbitrary crossing points.
+      g.appendChild(svgEl('circle', {
+        cx: fp.x.toFixed(1), cy: fp.y.toFixed(1), r: '10',
+        fill: 'none', stroke: INK, 'stroke-width': '0.8', opacity: '0.35',
+      }));
+      g.appendChild(svgEl('circle', {
+        cx: fp.x.toFixed(1), cy: fp.y.toFixed(1), r: '2.4',
+        fill: INK, opacity: '0.4',
+      }));
+    });
+    return g;
+  }
+
+  // A soft vignette + a scatter of foxing stains + a fine fiber grain,
+  // stacked with a multiply blend over the finished map so land and sea
+  // alike pick up the same aged-sheet tint - drawn last (on top of
+  // everything) rather than as a background, since a background tint
+  // would only ever show through gaps.
+  function buildPaperTexture(){
+    const g = svgEl('g', { class: 'paper-texture' });
+    g.style.pointerEvents = 'none';
+    g.style.mixBlendMode = 'multiply';
+
+    const defs = svgEl('defs');
+    const vignette = svgEl('radialGradient', {
+      id: 'paperVignette', cx: '50%', cy: '46%', r: '75%',
+    });
+    vignette.appendChild(svgEl('stop', { offset: '55%', 'stop-color': '#fff', 'stop-opacity': '0' }));
+    vignette.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#8a6a3a', 'stop-opacity': '0.55' }));
+    defs.appendChild(vignette);
+
+    const grain = svgEl('pattern', {
+      id: 'paperGrain', width: '9', height: '9', patternUnits: 'userSpaceOnUse',
+      patternTransform: 'rotate(19)',
+    });
+    // A few off-white/tan flecks per tile, at slightly different spots so
+    // the repeat doesn't read as an obvious grid at normal zoom.
+    [[1.2, 2.1, 0.55], [5.8, 1.4, 0.4], [3.1, 6.4, 0.5], [7.6, 7.1, 0.35], [0.4, 5.0, 0.4]]
+      .forEach(function(spot){
+        grain.appendChild(svgEl('circle', {
+          cx: String(spot[0]), cy: String(spot[1]), r: String(spot[2]),
+          fill: '#7a5a35', opacity: '0.18',
+        }));
+      });
+    defs.appendChild(grain);
+    g.appendChild(defs);
+
+    g.appendChild(svgEl('rect', {
+      x: String(VB_X), y: String(VB_Y), width: String(VB_W), height: String(VB_H),
+      fill: 'url(#paperGrain)',
+    }));
+    g.appendChild(svgEl('rect', {
+      x: String(VB_X), y: String(VB_Y), width: String(VB_W), height: String(VB_H),
+      fill: 'url(#paperVignette)',
+    }));
+
+    // Foxing: a handful of soft, irregular sepia blotches, positioned and
+    // sized deterministically from elevationBias() (already used to seed
+    // the globe's relief) so this stays fixed across rebuilds instead of
+    // reshuffling every time the map is redrawn.
+    for (let i = 0; i < 9; i++){
+      const bx = elevationBias('fox-x:' + i), by = elevationBias('fox-y:' + i), br = elevationBias('fox-r:' + i);
+      const cx = VB_X + VB_W * (0.08 + bx * 0.84);
+      const cy = VB_Y + VB_H * (0.08 + by * 0.84);
+      const r = 28 + br * 70;
+      const stain = svgEl('ellipse', {
+        cx: cx.toFixed(1), cy: cy.toFixed(1), rx: r.toFixed(1), ry: (r * (0.6 + br * 0.5)).toFixed(1),
+        fill: '#7a5a35', opacity: (0.05 + br * 0.07).toFixed(2),
+      });
+      g.appendChild(stain);
+    }
+
+    return g;
+  }
+
   function buildFlatMap(){
     flatSvg.setAttribute('viewBox', VIEWBOX);
     flatSvg.innerHTML = '';
+
+    // Chart dressing first, so every landmass drawn afterward paints over
+    // it - built unconditionally (cheap: a few dozen lines/shapes, no
+    // filters) and just hidden outside Parchment, see
+    // repaintOwnershipColors()'s theme check below.
+    rhumbLinesGroup = buildRhumbLines();
+    rhumbLinesGroup.style.display = (currentThemeName() === 'parchment') ? '' : 'none';
+    flatSvg.appendChild(rhumbLinesGroup);
 
     const gIslands = document.createElementNS(NS, 'g');
     ISLAND_LIST.forEach(function(isl){
@@ -1107,9 +1237,14 @@
       el.setAttribute('d', l.d);
       el.style.fill = currentWaterColor();
       el.style.pointerEvents = 'none';
+      el.dataset.water = 'lake'; // repainted on theme switch, see repaintOwnershipColors()
       gLakes.appendChild(el);
     });
     flatSvg.appendChild(gLakes);
+
+    paperTextureGroup = buildPaperTexture();
+    paperTextureGroup.style.display = (currentThemeName() === 'parchment') ? '' : 'none';
+    flatSvg.appendChild(paperTextureGroup);
   }
 
   // ---- Flat map zoom & pan (same pattern as map.js) ----
@@ -1941,6 +2076,20 @@
     buildFeatures(); // refreshes features[].color (unclaimed + merge-fallback fills) from the new nationColor/tintForContinent
     const water = currentWaterColor();
     if (mapFrame) mapFrame.style.background = water;
+
+    const isParchment = currentThemeName() === 'parchment';
+    if (rhumbLinesGroup) rhumbLinesGroup.style.display = isParchment ? '' : 'none';
+    if (paperTextureGroup) paperTextureGroup.style.display = isParchment ? '' : 'none';
+
+    // Lakes are set via inline style rather than the 'fill' attribute (see
+    // buildFlatMap()), so update that same property here - otherwise they'd
+    // stay frozen at whatever color they were built with, out of step with
+    // the ocean/mapFrame around them.
+    if (flatSvg){
+      Array.prototype.forEach.call(flatSvg.querySelectorAll('[data-water="lake"]'), function(el){
+        el.style.fill = water;
+      });
+    }
 
     // Dataset-driven repaint, applied the same way to both SVGs: every
     // element that shows ownership/land color carries data-nation or
