@@ -52,10 +52,25 @@
   // recolors the water immediately, everywhere it's used, without this
   // file needing to know each theme's color itself.
   function currentWaterColor(){
-    try {
-      const v = getComputedStyle(document.body).getPropertyValue('--water').trim();
-      if (v) return v;
-    } catch (e){ /* getComputedStyle unavailable - fall through to the fixed default */ }
+    const theme = currentThemeName();
+    // Parchment and Relief both keep the original map's fixed ocean/lake
+    // color (the same WATER every other page on the site uses - see
+    // map.js's own copy of this constant) rather than pulling from
+    // --water. Relief's theme block in style.css deliberately copies
+    // Modern's chrome variables wholesale (buttons, panels, accent color -
+    // see that block's own comment), which includes --water; left
+    // unhandled here, that made Relief's flat map ocean render in the
+    // exact same blue as Modern's, so its flat map read as just Modern
+    // under a different name instead of its own look. Only Modern (whose
+    // whole point is "blue water, white continents") and Dark Mode (whose
+    // --water is deliberately a darker, near-black-compatible tone, not a
+    // copy of anything) actually need their own --water value here.
+    if (theme === 'modern' || theme === 'dark'){
+      try {
+        const v = getComputedStyle(document.body).getPropertyValue('--water').trim();
+        if (v) return v;
+      } catch (e){ /* getComputedStyle unavailable - fall through to the fixed default */ }
+    }
     return WATER;
   }
 
