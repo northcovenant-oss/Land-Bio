@@ -35,6 +35,50 @@
   const WATER = (typeof WATER_COLOR !== 'undefined') ? WATER_COLOR : '#bae3ff';
   const NEUTRAL_HEX = '#9c9484'; // fixed (not theme-driven) neutral fill for unclaimed land
 
+  // ---- Appearance theme awareness ----
+  // theme.js puts a 'theme-<name>' class on <body> (no class at all means
+  // Parchment, the default). Read straight from that instead of keeping a
+  // second copy of "which theme is active" in this file.
+  function currentThemeName(){
+    const cl = document.body.classList;
+    if (cl.contains('theme-modern')) return 'modern';
+    if (cl.contains('theme-relief')) return 'relief';
+    if (cl.contains('theme-dark')) return 'dark';
+    return 'parchment';
+  }
+
+  // Ocean/lake fill: read straight from the theme's own --water custom
+  // property (style.css) instead of a fixed constant, so switching themes
+  // recolors the water immediately, everywhere it's used, without this
+  // file needing to know each theme's color itself.
+  function currentWaterColor(){
+    try {
+      const v = getComputedStyle(document.body).getPropertyValue('--water').trim();
+      if (v) return v;
+    } catch (e){ /* getComputedStyle unavailable - fall through to the fixed default */ }
+    return WATER;
+  }
+
+  // Modern is the only theme with real per-nation data behind it (the Land
+  // Bio Data sheet's own "color" column, once configured - see
+  // FIELD_ALIASES/fetchLandBioSheet below), so it keeps the old
+  // infinite-hue golden-angle scheme as a fallback for any nation that
+  // hasn't set one. The other three themes have no such data source, so
+  // instead of an unbounded rainbow they each cycle through a small, fixed
+  // set of colors hand-picked to sit well on that theme's own palette.
+  const THEME_NATION_PALETTES = {
+    // Antique-cartography ink colors, sitting comfortably next to Parchment's
+    // gold/seal-red chrome.
+    parchment: ['#8a5a2b', '#5c7a4a', '#6b4c7a', '#8a3a3a'],
+    // Relief reuses Modern's blue/red chrome (see its comment in style.css)
+    // but its map itself is mostly green/brown terrain and blue ocean, so
+    // its palette leans on saturated, high-contrast accents that still read
+    // clearly as an outline color over that terrain.
+    relief: ['#e0473e', '#2f6fed', '#f4b400', '#8e44ad'],
+    // Bright enough to hold up against Dark Mode's near-black chrome.
+    dark: ['#e6c169', '#6fb1e6', '#7fd88f', '#e08fa0'],
+  };
+
   // ---- DOM ----
   const mapFrame = document.getElementById('mapFrame');
   const tooltip = document.getElementById('tooltip');
@@ -59,6 +103,12 @@
     });
   }
 
+  // Best-effort initial paint - theme.js (which sets the theme class on
+  // <body>) hasn't run yet at this point (it's the next <script> tag after
+  // this file), so currentWaterColor() can't read the real saved theme
+  // here. Boot's Promise.all handler and repaintOwnershipColors() below
+  // both repaint this correctly once the theme class (and, for boot, the
+  // actual data) is in place.
   if (mapFrame) mapFrame.style.background = WATER;
 
   // =========================================================================
@@ -269,7 +319,33 @@
     continentTint[c.id] = 'hsl(' + ((CONTINENT_HUE_OFFSET + i * GOLDEN_ANGLE) % 360).toFixed(1) + ', 22%, 68%)';
   });
   function tintForContinent(continentId){
+    // Modern's whole point is "white continents, blue ocean" - unclaimed
+    // land there is flat white rather than the muted per-continent tint
+    // the other themes use.
+    if (currentThemeName() === 'modern') return '#ffffff';
     return continentTint[continentId] || NEUTRAL_HEX;
+  }
+
+  // Nation fill/border colors, recomputed whenever the active theme could
+  // change what a nation should look like (boot, and every Appearance
+  // switch via window.refreshGlobeTheme below). Only Modern draws on the
+  // Land Bio Data sheet's per-nation "color" field; everything else cycles
+  // through that theme's fixed 4-color palette.
+  function computeNationColors(sortedNames){
+    const theme = currentThemeName();
+    const palette = THEME_NATION_PALETTES[theme];
+    const colors = {};
+    sortedNames.forEach(function(name, i){
+      if (theme === 'modern'){
+        const sheetRow = landBioByName[name.toUpperCase()];
+        colors[name] = (sheetRow && sheetRow.color) ? sheetRow.color : colorForIndex(i);
+      } else if (palette && palette.length){
+        colors[name] = palette[i % palette.length];
+      } else {
+        colors[name] = colorForIndex(i);
+      }
+    });
+    return colors;
   }
 
   let takenIndex = {};       // provinceLabel(upper) -> claim record
@@ -703,6 +779,11 @@
     airforce: ['airforce'],
     expeditionary: ['expeditionaryforces'],
     paramilitary: ['paramilitarymilitiagendarmes'],
+    // Only used by the Modern theme's nation coloring (computeNationColors
+    // above) - any CSS color the sheet owner wants to enter (a hex code
+    // like "#3a6b8f", or a named color like "steelblue") is passed straight
+    // through as an SVG fill/stroke value.
+    color: ['color', 'landbiocolor', 'nationcolor', 'mapcolor'],
   };
 
   function buildHeaderIndex(headerRow){
@@ -751,6 +832,7 @@
             nationalStance: get('nationalStance'),
             navy: get('navy'), army: get('army'), airforce: get('airforce'),
             expeditionary: get('expeditionary'), paramilitary: get('paramilitary'),
+            color: get('color'),
           };
         }
         console.log('[Map] Loaded land bio data for ' + Object.keys(byNation).length + ' nation(s).');
@@ -912,6 +994,7 @@
       el.setAttribute('d', isl.d);
       if (isl.transform) el.setAttribute('transform', isl.transform);
       el.setAttribute('fill', tintForContinent(isl.continent));
+      el.dataset.continent = isl.continent;
       el.style.pointerEvents = 'none';
       el.style.opacity = '0.85';
       gIslands.appendChild(el);
@@ -930,6 +1013,7 @@
       el.setAttribute('d', continentFullFlatPathById[continentId]);
       el.setAttribute('class', 'nation-province');
       el.setAttribute('fill', tintForContinent(continentId));
+      el.dataset.continent = continentId;
       el.style.pointerEvents = 'none';
       gContinents.appendChild(el);
     });
@@ -1006,7 +1090,7 @@
     LAKE_LIST.forEach(function(l){
       const el = document.createElementNS(NS, 'path');
       el.setAttribute('d', l.d);
-      el.style.fill = WATER;
+      el.style.fill = currentWaterColor();
       el.style.pointerEvents = 'none';
       gLakes.appendChild(el);
     });
@@ -1664,7 +1748,8 @@
   // globe's original look, still used for the Modern/Parchment/Dark
   // themes - only "Relief" gets the procedural terrain above) ----
   function buildGlobeClassicLayer(landFeatures, container){
-    globeSphereEl = svgEl('path', { class: 'globe-sphere', fill: WATER });
+    globeSphereEl = svgEl('path', { class: 'globe-sphere' });
+    globeSphereEl.style.fill = currentWaterColor();
     container.appendChild(globeSphereEl);
 
     globeGraticuleEl = svgEl('path', { class: 'globe-graticule' });
@@ -1691,6 +1776,7 @@
     continentShapeFeatures.forEach(function(f){
       const p = svgEl('path', { class: 'nation-province continent-shape', fill: f.color });
       p.dataset.id = f.id;
+      p.dataset.continent = f.label;
       globeEls[f.id] = p;
       globeFeatures.push(f);
       globeProvincesGroup.appendChild(p);
@@ -1826,18 +1912,59 @@
   projGlobeBtn.addEventListener('click', showGlobeView);
   projFlatBtn.addEventListener('click', showFlatView);
 
+  // Repaints every already-drawn nation/continent/water fill in place, on
+  // both the flat map and whichever globe layer is currently built,
+  // without rebuilding any geometry - so an Appearance switch updates
+  // colors immediately without losing the globe's current rotation/zoom.
+  // Needed because Modern draws nation color from the Land Bio Data sheet
+  // while the other three themes cycle a fixed 4-color palette (see
+  // computeNationColors/THEME_NATION_PALETTES above) - switching themes
+  // has to re-run that logic and re-apply its result, not just let CSS
+  // variables cascade.
+  function repaintOwnershipColors(){
+    nationColor = computeNationColors(Object.keys(claimsByName).sort());
+    buildFeatures(); // refreshes features[].color (unclaimed + merge-fallback fills) from the new nationColor/tintForContinent
+    const water = currentWaterColor();
+    if (mapFrame) mapFrame.style.background = water;
+
+    // Dataset-driven repaint, applied the same way to both SVGs: every
+    // element that shows ownership/land color carries data-nation or
+    // data-continent regardless of which code path drew it (merged-shape
+    // or per-province-fallback), so this stays correct even for the rare
+    // nation/continent whose geometry merge failed and fell back to
+    // per-province fills.
+    [flatSvg, globeSvg].forEach(function(svg){
+      if (!svg) return;
+      Array.prototype.forEach.call(svg.querySelectorAll('.nation-province[data-nation]'), function(el){
+        const name = el.dataset.nation;
+        if (name) el.setAttribute('fill', nationColor[name] || NEUTRAL_HEX);
+      });
+      Array.prototype.forEach.call(svg.querySelectorAll('.nation-border[data-nation]'), function(el){
+        const name = el.dataset.nation;
+        if (name) el.setAttribute('stroke', nationColor[name] || NEUTRAL_HEX);
+      });
+      Array.prototype.forEach.call(svg.querySelectorAll('[data-continent]'), function(el){
+        el.setAttribute('fill', tintForContinent(el.dataset.continent));
+      });
+    });
+    if (globeSphereEl && currentGlobeMode() === 'classic'){
+      globeSphereEl.style.fill = water;
+    }
+  }
+
   // theme.js calls this after switching the Appearance theme (same
-  // convention as map.js's window.refreshMapTheme) - only "Relief" needs
-  // a real rebuild here, since it's the only theme that changes how the
-  // globe is actually constructed (terrain filter vs. flat fills); the
-  // other themes reskin via CSS variables the existing DOM already reads
-  // from, no rebuild required.
+  // convention as map.js's window.refreshMapTheme). "Relief" still needs a
+  // real rebuild since it's the only theme that changes how the globe is
+  // actually constructed (terrain filter vs. flat fills); the other
+  // Modern/Parchment/Dark switches just repaint colors in place.
   window.refreshGlobeTheme = function(){
     if (!globeBuilt) return; // first build (if any) will already pick up the current theme
     const mode = currentGlobeMode();
-    if (mode === globeBuiltMode) return;
-    globeBuilt = false;
-    buildGlobeView();
+    if (mode !== globeBuiltMode){
+      globeBuilt = false;
+      buildGlobeView();
+    }
+    repaintOwnershipColors();
   };
 
   // =========================================================================
@@ -1855,13 +1982,14 @@
     claimsByName = {};
     claims.forEach(function(c){ claimsByName[c.name] = c; });
 
-    const sortedNames = Object.keys(claimsByName).sort();
-    nationColor = {};
-    sortedNames.forEach(function(name, i){ nationColor[name] = colorForIndex(i); });
-
     landBioByName = landBio.rows;
     landBioConfigured = landBio.configured;
     landBioError = landBio.error;
+
+    // Needs landBioByName already in place - Modern's nation colors read
+    // the sheet's "color" field from it.
+    nationColor = computeNationColors(Object.keys(claimsByName).sort());
+    if (mapFrame) mapFrame.style.background = currentWaterColor();
 
     buildFeatures();
     buildNationGeometry();

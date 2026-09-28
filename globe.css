@@ -47,7 +47,7 @@
 }
 .globe-stage{ cursor: grab; }
 .globe-stage.dragging{ cursor: grabbing; }
-#globeSvg .globe-sphere{ fill: var(--panel-bg, #bae3ff); }
+#globeSvg .globe-sphere{ fill: var(--water, #bae3ff); }
 #globeSvg .globe-graticule{ fill:none; stroke: rgba(0,0,0,0.08); stroke-width: 0.5; }
 
 /*
