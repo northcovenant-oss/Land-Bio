@@ -1480,52 +1480,34 @@
     capTexture.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.7', intercept: '0.35' }));
     terrain.appendChild(capTexture);
 
-    const greyMaskRaw = svgEl('feComponentTransfer', { in: 'elevSpeckled', result: 'greyMaskRaw' });
-    greyMaskRaw.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
-    greyMaskRaw.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
-    greyMaskRaw.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
-    terrain.appendChild(greyMaskRaw);
-    // Capped the same way as the white mask below - left uncapped, this
-    // mask could reach full (opaque) alpha across a whole blurred-high
-    // region, which combined with the white cap layered on top of it is
-    // what actually read as a stark, solid blob rather than two softer,
-    // partially-transparent highland/peak layers blending into the shaded
-    // terrain underneath.
-    const greyMaskLinear = svgEl('feComponentTransfer', { in: 'greyMaskRaw', result: 'greyMaskLinear' });
-    greyMaskLinear.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.35', intercept: '0' }));
-    greyMaskLinear.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.35', intercept: '0' }));
-    greyMaskLinear.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.35', intercept: '0' }));
-    terrain.appendChild(greyMaskLinear);
-    terrain.appendChild(svgEl('feComposite', { in: 'greyMaskLinear', in2: 'capTexture', operator: 'arithmetic', k1: '1', k2: '0', k3: '0', k4: '0', result: 'greyMask' }));
-    terrain.appendChild(svgEl('feColorMatrix', { in: 'greyMask', type: 'matrix', values: '0 0 0 0 0.56  0 0 0 0 0.57  0 0 0 0 0.58  1 0 0 0 0', result: 'greyLayer' }));
-    terrain.appendChild(svgEl('feComposite', { in: 'greyLayer', in2: 'shadedTerrain', operator: 'over', result: 'withGrey' }));
-
-    // A per-province hashed elevation field (see elevationBias() above),
-    // heavily blurred, occasionally has a cluster of neighboring
-    // provinces all land on high values by chance - that reads fine for
-    // the grey highland band, but a steep gamma curve on its own turns
-    // the whole flat top of a cluster like that solid white at once,
-    // showing up as a stark, oversized blob instead of a snowcap. The
-    // elevSpeckled multiply above already breaks that up some; on top of
-    // it, a high gamma exponent makes the threshold rarer and smaller,
-    // an extra blur on the mask itself softens its edge instead of
-    // cutting sharply, and capping the mask's peak value well below 1
-    // keeps even its brightest point a highlight over the terrain rather
-    // than a flat white pool.
-    const whiteMask = svgEl('feComponentTransfer', { in: 'elevSpeckled', result: 'whiteMaskRaw' });
-    whiteMask.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '20', offset: '0' }));
-    whiteMask.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '20', offset: '0' }));
-    whiteMask.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '20', offset: '0' }));
-    terrain.appendChild(whiteMask);
-    terrain.appendChild(svgEl('feGaussianBlur', { in: 'whiteMaskRaw', stdDeviation: '5', result: 'whiteMaskSoft' }));
-    const whiteMaskCapped = svgEl('feComponentTransfer', { in: 'whiteMaskSoft', result: 'whiteMaskCapped' });
-    whiteMaskCapped.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.22', intercept: '0' }));
-    whiteMaskCapped.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.22', intercept: '0' }));
-    whiteMaskCapped.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.22', intercept: '0' }));
-    terrain.appendChild(whiteMaskCapped);
-    terrain.appendChild(svgEl('feComposite', { in: 'whiteMaskCapped', in2: 'capTexture', operator: 'arithmetic', k1: '1', k2: '0', k3: '0', k4: '0', result: 'whiteMask' }));
-    terrain.appendChild(svgEl('feColorMatrix', { in: 'whiteMask', type: 'matrix', values: '0 0 0 0 0.97  0 0 0 0 0.97  0 0 0 0 0.95  1 0 0 0 0', result: 'whiteLayer' }));
-    terrain.appendChild(svgEl('feComposite', { in: 'whiteLayer', in2: 'withGrey', operator: 'over', result: 'withCaps' }));
+    // A single soft highland highlight, in a lime green rather than the
+    // grey/white "highland band + snow cap" this used to be. Those read as
+    // mountain peaks, which these high-elevation-hash spots were never
+    // meant to represent (there's no separate "this province is a real
+    // mountain" data - it's just the hashed elevation field running high
+    // there) - grey and especially white made that misleading, and even
+    // after several rounds of tuning to shrink/soften/texture them, still
+    // stood out as flatly wrong rather than blending in as terrain. Lime
+    // reads as "brighter patch of the same green", not a different kind of
+    // terrain, so it never needs to be as heavily suppressed as the white
+    // cap did.
+    const highMaskRaw = svgEl('feComponentTransfer', { in: 'elevSpeckled', result: 'highMaskRaw' });
+    highMaskRaw.appendChild(svgEl('feFuncR', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+    highMaskRaw.appendChild(svgEl('feFuncG', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+    highMaskRaw.appendChild(svgEl('feFuncB', { type: 'gamma', amplitude: '1', exponent: '4.5', offset: '0' }));
+    terrain.appendChild(highMaskRaw);
+    // Capped well below full opacity, same reasoning as the old grey/white
+    // masks - left uncapped, this could reach solid opaque alpha across a
+    // whole blurred-high region and read as a flat painted patch instead
+    // of a soft highlight blended into the shaded terrain underneath.
+    const highMaskLinear = svgEl('feComponentTransfer', { in: 'highMaskRaw', result: 'highMaskLinear' });
+    highMaskLinear.appendChild(svgEl('feFuncR', { type: 'linear', slope: '0.4', intercept: '0' }));
+    highMaskLinear.appendChild(svgEl('feFuncG', { type: 'linear', slope: '0.4', intercept: '0' }));
+    highMaskLinear.appendChild(svgEl('feFuncB', { type: 'linear', slope: '0.4', intercept: '0' }));
+    terrain.appendChild(highMaskLinear);
+    terrain.appendChild(svgEl('feComposite', { in: 'highMaskLinear', in2: 'capTexture', operator: 'arithmetic', k1: '1', k2: '0', k3: '0', k4: '0', result: 'highMask' }));
+    terrain.appendChild(svgEl('feColorMatrix', { in: 'highMask', type: 'matrix', values: '0 0 0 0 0.62  0 0 0 0 0.80  0 0 0 0 0.32  1 0 0 0 0', result: 'highLayer' }));
+    terrain.appendChild(svgEl('feComposite', { in: 'highLayer', in2: 'shadedTerrain', operator: 'over', result: 'withCaps' }));
 
     terrain.appendChild(svgEl('feComposite', { in: 'withCaps', in2: 'SourceGraphic', operator: 'in' }));
     defs.appendChild(terrain);
