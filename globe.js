@@ -1031,49 +1031,76 @@
   // than a lat/lon grid. Drawn as the very first thing in the SVG so every
   // landmass paints over it; only the open water ends up showing lines,
   // same as on a real one.
+  // A k-point star outline (alternating outer/inner vertices, first point
+  // aimed due north) as an SVG path 'd' string - the actual compass-rose
+  // ornament drawn at a focal point, not just a ring.
+  function starPath(cx, cy, points, outerR, innerR){
+    const step = Math.PI / points; // half the angle between two outer points
+    let d = '';
+    for (let i = 0; i < points * 2; i++){
+      const r = (i % 2 === 0) ? outerR : innerR;
+      const angle = -Math.PI / 2 + i * step;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r;
+      d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+    }
+    return d + 'Z';
+  }
+
+  // One real compass rose: 32 rhumb lines fanning out to the edge of the
+  // sheet (weighted in three tiers - 8 main/16 half/32 quarter points, the
+  // way an actual rose network is drawn), an 8-point star ornament sized
+  // to the rose, and a couple of rings marking its center.
+  function buildCompassRose(g, fp, reach, opts){
+    const scale = (opts && opts.scale) || 1;
+    const weight = (opts && opts.weight) || 1;
+    for (let deg = 0; deg < 360; deg += 11.25){
+      const rad = deg * Math.PI / 180;
+      const onMain = Math.abs((deg / 45) - Math.round(deg / 45)) < 1e-6;
+      const onHalf = !onMain && Math.abs((deg / 22.5) - Math.round(deg / 22.5)) < 1e-6;
+      const tier = onMain ? 'main' : (onHalf ? 'half' : 'quarter');
+      const line = svgEl('line', {
+        x1: fp.x.toFixed(1), y1: fp.y.toFixed(1),
+        x2: (fp.x + Math.cos(rad) * reach).toFixed(1),
+        y2: (fp.y + Math.sin(rad) * reach).toFixed(1),
+        stroke: INK,
+        'stroke-width': ((tier === 'main' ? 1.2 : tier === 'half' ? 0.7 : 0.35) * weight).toFixed(2),
+        opacity: ((tier === 'main' ? 0.32 : tier === 'half' ? 0.20 : 0.11) * weight).toFixed(2),
+      });
+      g.appendChild(line);
+    }
+    const starOuter = 26 * scale, starInner = 10 * scale;
+    g.appendChild(svgEl('path', {
+      d: starPath(fp.x, fp.y, 8, starOuter, starInner),
+      fill: 'none', stroke: INK, 'stroke-width': (1 * scale).toFixed(2), opacity: (0.4 * weight).toFixed(2),
+    }));
+    g.appendChild(svgEl('circle', {
+      cx: fp.x.toFixed(1), cy: fp.y.toFixed(1), r: (starOuter * 1.15).toFixed(1),
+      fill: 'none', stroke: INK, 'stroke-width': (0.6 * scale).toFixed(2), opacity: (0.28 * weight).toFixed(2),
+    }));
+    g.appendChild(svgEl('circle', {
+      cx: fp.x.toFixed(1), cy: fp.y.toFixed(1), r: (3 * scale).toFixed(1),
+      fill: INK, opacity: (0.45 * weight).toFixed(2),
+    }));
+  }
+
+  // Classic portolan layout: one large, fully-dressed rose anchoring the
+  // center of the sheet, plus four smaller secondary roses out at the
+  // cardinal edges - fewer, more deliberate focal points than a scatter of
+  // identical roses, with the center one doing the most work visually.
   function buildRhumbLines(){
     const g = svgEl('g', { class: 'rhumb-lines' });
     g.style.pointerEvents = 'none';
-    const focalPoints = [
-      { x: VB_X + VB_W * 0.50, y: VB_Y + VB_H * 0.50 },
-      { x: VB_X + VB_W * 0.10, y: VB_Y + VB_H * 0.12 },
-      { x: VB_X + VB_W * 0.90, y: VB_Y + VB_H * 0.12 },
-      { x: VB_X + VB_W * 0.10, y: VB_Y + VB_H * 0.88 },
-      { x: VB_X + VB_W * 0.90, y: VB_Y + VB_H * 0.88 },
-      { x: VB_X + VB_W * 0.50, y: VB_Y + VB_H * 0.06 },
-      { x: VB_X + VB_W * 0.50, y: VB_Y + VB_H * 0.94 },
-    ];
     const reach = Math.max(VB_W, VB_H) * 1.5; // long enough to run off any edge from any focal point
-    focalPoints.forEach(function(fp){
-      // 32-point compass: a line every 11.25 degrees, with the 8 main
-      // points drawn heavier/darker than the 24 half/quarter points -
-      // the same weighting real rose networks use so the chart doesn't
-      // read as a uniform starburst.
-      for (let deg = 0; deg < 360; deg += 11.25){
-        const rad = deg * Math.PI / 180;
-        const isMain = Math.abs((deg / 45) - Math.round(deg / 45)) < 1e-6;
-        const line = svgEl('line', {
-          x1: fp.x.toFixed(1), y1: fp.y.toFixed(1),
-          x2: (fp.x + Math.cos(rad) * reach).toFixed(1),
-          y2: (fp.y + Math.sin(rad) * reach).toFixed(1),
-          stroke: INK,
-          'stroke-width': isMain ? '1.1' : '0.45',
-          opacity: isMain ? '0.30' : '0.15',
-        });
-        g.appendChild(line);
-      }
-      // Small ring marking the rose's own center, plus a tighter 8-point
-      // star so the focal points read as deliberate roses instead of
-      // arbitrary crossing points.
-      g.appendChild(svgEl('circle', {
-        cx: fp.x.toFixed(1), cy: fp.y.toFixed(1), r: '10',
-        fill: 'none', stroke: INK, 'stroke-width': '0.8', opacity: '0.35',
-      }));
-      g.appendChild(svgEl('circle', {
-        cx: fp.x.toFixed(1), cy: fp.y.toFixed(1), r: '2.4',
-        fill: INK, opacity: '0.4',
-      }));
-    });
+    const center = { x: VB_X + VB_W * 0.5, y: VB_Y + VB_H * 0.5 };
+    const edgeRoses = [
+      { x: VB_X + VB_W * 0.5, y: VB_Y + VB_H * 0.08 },
+      { x: VB_X + VB_W * 0.5, y: VB_Y + VB_H * 0.92 },
+      { x: VB_X + VB_W * 0.08, y: VB_Y + VB_H * 0.5 },
+      { x: VB_X + VB_W * 0.92, y: VB_Y + VB_H * 0.5 },
+    ];
+    edgeRoses.forEach(function(fp){ buildCompassRose(g, fp, reach, { scale: 0.6, weight: 0.7 }); });
+    buildCompassRose(g, center, reach, { scale: 1.6, weight: 1 });
     return g;
   }
 
