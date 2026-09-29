@@ -984,7 +984,7 @@
     html += '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
     const subLines = [];
     if (capitalName) subLines.push('Capital: ' + escapeHtml(capitalName));
-    if (areaLabel) subLines.push(escapeHtml(areaLabel));
+    if (areaLabel) subLines.push('Area: ' + escapeHtml(areaLabel));
     if (subLines.length) html += '<div class="nc-sub">' + subLines.join('<br>') + '</div>';
 
     if (sheet){
