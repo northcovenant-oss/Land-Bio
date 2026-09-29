@@ -207,16 +207,18 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
 .nation-card{}
 
 .nation-card .nc-classification{
+  font-family: var(--font-display);
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
-  color: var(--ink-soft);
+  color: var(--ink);
   margin: 0 0 3px;
 }
 .nation-card .nc-name{
   font-family: var(--font-display);
-  font-size: 21px;
+  font-weight: 700;
+  font-size: 27px;
   color: var(--ink);
   margin: 0 0 2px;
 }
@@ -236,6 +238,7 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
 }
 .nation-card .nc-field-label{
   font-family: var(--font-display);
+  font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -253,8 +256,9 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   margin-top: 4px;
 }
 .nation-card .nc-link{
+  font-family: var(--font-display);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--gold);
   text-decoration: none;
   padding: 4px 10px;
@@ -264,6 +268,7 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
 .nation-card .nc-link:hover{ text-decoration: underline; background: rgba(0,0,0,0.04); }
 .nation-card .nc-section{
   font-family: var(--font-display);
+  font-weight: 700;
   font-size: 12px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -271,6 +276,32 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   margin: 18px 0 8px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+
+/*
+ * Cormorant Garamond (Modern/Relief/Dark's display face) tops out at weight
+ * 700 - a hairline stroke on top of that max weight gives its headings a
+ * bit more heft (confirmed against the font-comparison page). Scoped to
+ * those three themes only: Parchment uses Cinzel, which already goes bold
+ * enough on its own and doesn't need the stroke trick.
+ */
+body.theme-modern .nation-card .nc-classification,
+body.theme-modern .nation-card .nc-name,
+body.theme-modern .nation-card .nc-link,
+body.theme-modern .nation-card .nc-section,
+body.theme-modern .nation-card .nc-field-label,
+body.theme-relief .nation-card .nc-classification,
+body.theme-relief .nation-card .nc-name,
+body.theme-relief .nation-card .nc-link,
+body.theme-relief .nation-card .nc-section,
+body.theme-relief .nation-card .nc-field-label,
+body.theme-dark .nation-card .nc-classification,
+body.theme-dark .nation-card .nc-name,
+body.theme-dark .nation-card .nc-link,
+body.theme-dark .nation-card .nc-section,
+body.theme-dark .nation-card .nc-field-label{
+  -webkit-text-stroke: 0.45px currentColor;
+  text-stroke: 0.45px currentColor;
 }
 .nation-card .nc-section:first-of-type{ margin-top: 0; padding-top:0; border-top:none; }
 .nation-card .nc-provinces{
