@@ -86,6 +86,17 @@ path.nation-province.picked{ filter: brightness(1.2); stroke: var(--gold-bright)
 path.unclaimed-hitbox{ cursor: pointer; }
 
 /*
+ * Unclaimed land itself should no longer be clickable/hoverable - only
+ * claimed nations. This same .unclaimed-hitbox class also doubles as the
+ * Relief theme's click target for CLAIMED nations (since path.relief-claim
+ * has pointer-events:none there), so it can't be disabled as a whole -
+ * every hitbox globe.js builds sets data-nation="" specifically for
+ * unclaimed provinces (data-nation="<Nation>" for claimed ones), so target
+ * that empty value precisely.
+ */
+path.unclaimed-hitbox[data-nation=""]{ pointer-events: none; cursor: default; }
+
+/*
  * The globe's solid continent/island fill (globe.js's continentShapeFeatures)
  * sits under its own unclaimed-hitbox layer everywhere it matters, but
  * pointer-events:none here too as a safety net against any 1px seam
