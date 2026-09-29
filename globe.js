@@ -982,10 +982,10 @@
     let html = '';
     if (sheet && sheet.classification) html += '<div class="nc-classification">' + escapeHtml(sheet.classification) + '</div>';
     html += '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
-    const subParts = [];
-    if (capitalName) subParts.push('Capital: ' + escapeHtml(capitalName));
-    if (areaLabel) subParts.push(escapeHtml(areaLabel));
-    if (subParts.length) html += '<div class="nc-sub">' + subParts.join(' &middot; ') + '</div>';
+    const subLines = [];
+    if (capitalName) subLines.push('Capital: ' + escapeHtml(capitalName));
+    if (areaLabel) subLines.push(escapeHtml(areaLabel));
+    if (subLines.length) html += '<div class="nc-sub">' + subLines.join('<br>') + '</div>';
 
     if (sheet){
       if (sheet.factbook || sheet.application){
