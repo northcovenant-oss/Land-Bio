@@ -110,8 +110,12 @@
     // it. Softened rose/slate/ochre/mauve read clearly apart from each
     // other and from the green/brown terrain without shouting.
     relief: ['#b5675a', '#5b7fa6', '#c2954f', '#8a6a9e'],
-    // Bright enough to hold up against Dark Mode's near-black chrome.
-    dark: ['#e6c169', '#6fb1e6', '#7fd88f', '#e08fa0'],
+    // Four shades of gold, spread across lightness/saturation the same way
+    // Parchment's all-sepia set is - bronze, antique gold, bright gold,
+    // pale champagne - so neighboring nations still read apart from each
+    // other against the black ocean/continent interior, without breaking
+    // the single-metal "gold on black" look Dark Mode is going for.
+    dark: ['#8a6a1e', '#c9a54a', '#e6c169', '#f0dfa0'],
   };
 
   // ---- DOM ----
@@ -256,6 +260,28 @@
     }
     return true;
   }
+
+  // Capital-marker placement: a crude "average every point in the ring"
+  // centroid (same approximation map.js's own centroid() already uses for
+  // claim-seal placement) is good enough for parking a marker somewhere
+  // inside a province, without pulling in real polygon-centroid math. Used
+  // on both the province's pixel-space ring (flat map marker) and its
+  // lon/lat ring (globe marker, reprojected every frame - see
+  // updateCapitalMarker()/renderGlobe()). For an archipelago-style
+  // province, picking the ring with the most points (a rough proxy for
+  // "the mainland, not a tiny offshore islet") keeps the marker off of a
+  // stray speck.
+  function largestRing(rings){
+    let best = null;
+    (rings || []).forEach(function(r){ if (r && (!best || r.length > best.length)) best = r; });
+    return best;
+  }
+  function ringCentroid(ring){
+    if (!ring || !ring.length) return null;
+    let sx = 0, sy = 0;
+    ring.forEach(function(pt){ sx += pt[0]; sy += pt[1]; });
+    return [sx / ring.length, sy / ring.length];
+  }
   // In lon/lat degrees. Tuned against the real data: cuts ~105k points to
   // ~14.5k (avg ~12/province, worst case ~140) while keeping province
   // shapes clearly recognizable at any globe zoom level.
@@ -365,6 +391,12 @@
     // so land only ever separates from land by an ownership color, never
     // by which landmass it happens to be.
     if (theme === 'parchment') return PARCHMENT_LAND_BROWN;
+    // Dark Mode: a solid black continent interior (unclaimed land reads as
+    // a void, distinguished from the equally-black ocean only by the white
+    // coastline outline - see the body.theme-dark [data-continent] rule in
+    // globe.css) rather than the muted per-continent hues the default/
+    // relief look uses.
+    if (theme === 'dark') return '#000000';
     return continentTint[continentId] || NEUTRAL_HEX;
   }
 
@@ -421,6 +453,34 @@
         geometry: geometry,
       };
     });
+  }
+
+  // Real-world territory size, purely for flavor in the nation panel: this
+  // world has no stated physical scale of its own (the viewBox is just
+  // however many SVG units the source map happens to use), so there's no
+  // "real" km2 to report without picking SOME reference scale. Assuming
+  // the whole map is one Earth-sized sphere - the same assumption the
+  // globe view already makes by treating VIEWBOX's 360x180 span as a full
+  // equirectangular world - gives a concrete, defensible number instead of
+  // an arbitrary one. d3.geoArea() returns a geometry's area in steradians
+  // on a UNIT sphere; multiplying by Earth's mean radius squared converts
+  // that to km2 (the same relationship that makes 4*PI*EARTH_RADIUS_KM^2
+  // work out to Earth's real ~510.1 million km2 surface area) - this is
+  // NOT a naive pixel-area conversion, which would badly overstate
+  // territory near the poles (an equirectangular map stretches high
+  // latitudes horizontally without shrinking them vertically to match).
+  const EARTH_RADIUS_KM = 6371;
+  function nationAreaKm2(nationName){
+    if (typeof d3 === 'undefined' || !d3.geoArea) return null; // vendor/d3-geo.min.js missing/failed - see handleGlobeFailure
+    let steradians = 0;
+    features.forEach(function(f){
+      if (f.nationName === nationName && f.geometry) steradians += d3.geoArea(f.geometry);
+    });
+    return steradians * EARTH_RADIUS_KM * EARTH_RADIUS_KM;
+  }
+  function formatAreaKm2(km2){
+    if (km2 == null || !isFinite(km2)) return null;
+    return Math.round(km2).toLocaleString('en-US') + ' km²';
   }
 
   // =========================================================================
@@ -922,10 +982,13 @@
 
     const provinces = (claim && claim.provinces) || [];
     const capital = claim && claim.capital;
+    const areaLabel = formatAreaKm2(nationAreaKm2(nationName));
 
     let html = '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
     html += '<div class="nc-sub">' + provinces.length + ' province' + (provinces.length === 1 ? '' : 's') +
-      ' claimed' + (capital ? ' &middot; Capital: ' + escapeHtml(capital) : '') + '</div>';
+      ' claimed' +
+      (areaLabel ? ' &middot; ' + escapeHtml(areaLabel) : '') +
+      (capital ? ' &middot; Capital: ' + escapeHtml(capital) : '') + '</div>';
 
     if (sheet){
       html += '<div class="nc-section">Overview</div>';
@@ -961,19 +1024,20 @@
       html += '<div class="nc-sheet-missing">This site’s Land Bio Data sheet isn’t connected yet, so only claim/territory info is shown here.</div>';
     }
 
-    if (provinces.length){
-      html += '<div class="nc-section">Territory</div>';
-      html += '<div class="nc-provinces">' + provinces.map(function(label){
-        const isCap = capital && capital.toUpperCase() === label.toUpperCase();
-        return '<span class="nc-province-chip' + (isCap ? ' capital' : '') + '">' + escapeHtml(label) + (isCap ? ' ★' : '') + '</span>';
-      }).join('') + '</div>';
-    }
-
     nationCard.innerHTML = html;
     showPopup();
   }
 
   let selectedNationName = null;
+
+  // Capital-province marker (both views): a small star badge parked at the
+  // selected nation's capital, on top of the existing whole-nation
+  // brightness/border highlight - see buildCapitalMarker()/
+  // updateCapitalMarker() below, and the renderGlobe() hook that keeps the
+  // globe's copy reprojected as it rotates.
+  let flatCapitalMarkerG = null;
+  let globeCapitalMarkerG = null;
+  let globeCapitalLonLat = null; // [lon, lat] of the current capital, or null when none/unselected
 
   function selectProvince(props){
     if (props.nationName){
@@ -1002,6 +1066,58 @@
     Array.from(globeSvg.querySelectorAll('.relief-claim')).forEach(function(el){
       el.classList.toggle('picked', !!selectedNationName && el.dataset.nation === selectedNationName);
     });
+    updateCapitalMarker();
+  }
+
+  // A small white-and-gold star badge (built from the same starPath()
+  // helper the rhumb-line compass roses use), centered on its own <g> at
+  // the origin so placing it is just a translate() - see updateCapitalMarker().
+  // Deliberately NOT colored from theme variables: it has to stay legible
+  // over every theme's own palette (parchment sepia, dark near-black gold
+  // nations, relief terrain, modern flat colors alike), the same reasoning
+  // a map pin icon stays white+black regardless of the map style under it.
+  function buildCapitalMarker(scale){
+    const g = svgEl('g', { class: 'capital-marker' });
+    g.style.pointerEvents = 'none';
+    g.style.display = 'none';
+    const haloR = 15 * scale;
+    g.appendChild(svgEl('circle', {
+      cx: '0', cy: '0', r: haloR.toFixed(1),
+      fill: '#1a1a1a', opacity: '0.28',
+    }));
+    g.appendChild(svgEl('circle', {
+      cx: '0', cy: '0', r: (haloR * 0.78).toFixed(1),
+      fill: '#fffdf5', stroke: '#20180a', 'stroke-width': (1.4 * scale).toFixed(2),
+    }));
+    g.appendChild(svgEl('path', {
+      d: starPath(0, 0, 5, 10 * scale, 4.2 * scale),
+      fill: '#c9a227', stroke: '#6b4f10', 'stroke-width': (0.9 * scale).toFixed(2), 'stroke-linejoin': 'round',
+    }));
+    return g;
+  }
+
+  // Repositions (or hides) the capital marker on both views for whatever
+  // selectedNationName currently is - called from applySelectionHighlight()
+  // above, so it stays correct through every selection change, theme
+  // switch's rebuild, and view toggle.
+  function updateCapitalMarker(){
+    let base = null;
+    if (selectedNationName){
+      const capFeature = features.find(function(f){ return f.nationName === selectedNationName && f.isCapital; });
+      if (capFeature) base = baseById[capFeature.id];
+    }
+    if (flatCapitalMarkerG){
+      const c = base ? ringCentroid(largestRing(base.pixelRings)) : null;
+      if (c){
+        flatCapitalMarkerG.setAttribute('transform', 'translate(' + c[0].toFixed(1) + ',' + c[1].toFixed(1) + ')');
+        flatCapitalMarkerG.style.display = '';
+      } else {
+        flatCapitalMarkerG.style.display = 'none';
+      }
+    }
+    globeCapitalLonLat = base ? ringCentroid(largestRing(base.rings)) : null;
+    if (globeCapitalMarkerG && !globeCapitalLonLat) globeCapitalMarkerG.style.display = 'none';
+    scheduleGlobeRender(); // positions (or hides) the globe copy - see renderGlobe()
   }
 
   function showMapTooltip(e, props){
@@ -1035,7 +1151,21 @@
   // they don't depend on ownership data at all.
   let rhumbLinesGroup = null;
   let paperTextureGroup = null;
+  // Modern-only flat-map dressing: a plain lon/lat grid (the globe's
+  // classic layer already draws one via globeGraticuleEl/.globe-graticule -
+  // this is that same idea, but for the flat map, which had nothing at all
+  // before). Built once, shown/hidden on theme switch exactly like the
+  // rhumb-lines/paper-texture pair above.
+  let graticuleGroup = null;
+  // Parchment-only globe dressing: the flat map's rhumb-line/compass-rose
+  // network, reprojected into the globe's own GLOBE_VB_SIZE screen space
+  // and clipped to the sphere's disc - built alongside globeGraticuleEl in
+  // buildGlobeClassicLayer() and toggled against it the same way
+  // rhumbLinesGroup/graticuleGroup are toggled against each other on the
+  // flat map (see repaintOwnershipColors()).
+  let globeRhumbLinesGroup = null;
   const INK = '#5a2a1e'; // faded iron-gall-ink brown, not flat black
+  const GRID_INK = '#39506b'; // muted slate-blue, reads as "reference grid" not "ink"
 
   // A handful of compass roses scattered across the sheet, each spraying
   // straight rhumb lines the way a 15th/16th-century portolan chart does -
@@ -1113,6 +1243,73 @@
     ];
     edgeRoses.forEach(function(fp){ buildCompassRose(g, fp, reach, { scale: 0.6, weight: 0.7 }); });
     buildCompassRose(g, center, reach, { scale: 1.6, weight: 1 });
+    return g;
+  }
+
+  // Same idea, projected onto the globe's own screen space instead of the
+  // flat map's: a compass-rose network built with the exact same
+  // starPath()/buildCompassRose() helpers above (they only take a focal
+  // point + reach, no flat-map-specific coordinates), then clipped to the
+  // sphere's own circle so lines never spray past the globe's visible disc
+  // into the empty square around it. The circle is defined once from
+  // baseGlobeScale (the projection's un-zoomed .scale()) rather than
+  // projection.scale()/.translate() at call time - both stay fixed across
+  // drag-to-rotate (only .rotate() changes) and zoom is a CSS transform on
+  // the whole <svg>, not a projection change, so a static circle here stays
+  // aligned with the sphere on every frame without needing to be rebuilt.
+  function buildGlobeRhumbLines(){
+    const g = svgEl('g', { class: 'rhumb-lines' });
+    g.style.pointerEvents = 'none';
+    const cx = GLOBE_VB_SIZE / 2, cy = GLOBE_VB_SIZE / 2;
+    const clipId = 'globe-rhumb-clip';
+    const defs = svgEl('defs');
+    const clip = svgEl('clipPath', { id: clipId });
+    clip.appendChild(svgEl('circle', { cx: String(cx), cy: String(cy), r: String(baseGlobeScale) }));
+    defs.appendChild(clip);
+    g.appendChild(defs);
+    g.setAttribute('clip-path', 'url(#' + clipId + ')');
+    const reach = baseGlobeScale * 1.6;
+    const edgeRoses = [
+      { x: cx, y: cy - baseGlobeScale * 0.62 },
+      { x: cx, y: cy + baseGlobeScale * 0.62 },
+      { x: cx - baseGlobeScale * 0.62, y: cy },
+      { x: cx + baseGlobeScale * 0.62, y: cy },
+    ];
+    edgeRoses.forEach(function(fp){ buildCompassRose(g, fp, reach, { scale: 0.55, weight: 0.7 }); });
+    buildCompassRose(g, { x: cx, y: cy }, reach, { scale: 1.4, weight: 1 });
+    return g;
+  }
+
+  // Modern-only flat-map dressing: a plain equirectangular lon/lat grid -
+  // straightforward here (unlike the globe) because the flat map already
+  // IS an equirectangular projection (see toLonLat()/VB_W/VB_H above), so a
+  // meridian/parallel is just a straight vertical/horizontal line at a
+  // fixed fraction of the viewBox. Every 20 degrees, drawn on TOP of
+  // everything (unlike the rhumb lines, which sit under the land) - a
+  // reference grid customarily marks over land and sea alike, faint enough
+  // not to compete with the claim colors underneath it.
+  function buildFlatGraticule(){
+    const g = svgEl('g', { class: 'flat-graticule' });
+    g.style.pointerEvents = 'none';
+    const STEP = 20;
+    for (let lon = -180; lon <= 180; lon += STEP){
+      const x = VB_X + ((lon + 180) / 360) * VB_W;
+      const onPrimeOrAntimeridian = (lon === 0 || lon === -180 || lon === 180);
+      g.appendChild(svgEl('line', {
+        x1: x.toFixed(1), y1: String(VB_Y), x2: x.toFixed(1), y2: String(VB_Y + VB_H),
+        stroke: GRID_INK, 'stroke-width': onPrimeOrAntimeridian ? '0.9' : '0.5',
+        opacity: onPrimeOrAntimeridian ? '0.32' : '0.18',
+      }));
+    }
+    for (let lat = -80; lat <= 80; lat += STEP){
+      const y = VB_Y + ((90 - lat) / 180) * VB_H;
+      const onEquator = (lat === 0);
+      g.appendChild(svgEl('line', {
+        x1: String(VB_X), y1: y.toFixed(1), x2: String(VB_X + VB_W), y2: y.toFixed(1),
+        stroke: GRID_INK, 'stroke-width': onEquator ? '0.9' : '0.5',
+        opacity: onEquator ? '0.32' : '0.18',
+      }));
+    }
     return g;
   }
 
@@ -1313,7 +1510,6 @@
       elevfieldG.appendChild(svgEl('path', { d: base.d, fill: 'rgb(' + elevGrayVal + ',' + elevGrayVal + ',' + elevGrayVal + ')' }));
       const speckGrayVal = Math.round(speckleBias(f.id) * 255);
       speckfieldG.appendChild(svgEl('path', { d: base.d, fill: 'rgb(' + speckGrayVal + ',' + speckGrayVal + ',' + speckGrayVal + ')' }));
-      landG.appendChild(svgEl('path', { d: base.d, fill: '#000000' }));
     });
     ISLAND_LIST.forEach(function(isl){
       const attrs = isl.transform ? { d: isl.d, transform: isl.transform } : { d: isl.d };
@@ -1322,11 +1518,63 @@
       biasfieldG.appendChild(svgEl('path', Object.assign({ fill: 'rgb(128,128,128)' }, attrs))); // no climate data for islands - neutral mid-tone
       elevfieldG.appendChild(svgEl('path', Object.assign({ fill: 'rgb(' + elevGrayVal + ',' + elevGrayVal + ',' + elevGrayVal + ')' }, attrs)));
       speckfieldG.appendChild(svgEl('path', Object.assign({ fill: 'rgb(' + speckGrayVal + ',' + speckGrayVal + ',' + speckGrayVal + ')' }, attrs)));
-      landG.appendChild(svgEl('path', Object.assign({ fill: '#000000' }, attrs)));
     });
     defs.appendChild(biasfieldG);
     defs.appendChild(elevfieldG);
     defs.appendChild(speckfieldG);
+
+    // The landmask silhouette itself (what the terrain filter's final
+    // feComposite operator="in" clips SourceGraphic against) is built from
+    // ALREADY-MERGED continent/nation flat paths (continentFullFlatPathById/
+    // nationFlatPathByName - the same dissolved geometry buildFlatClassicContent
+    // uses for its solid fills), concatenated into ONE <path>'s 'd' string
+    // rather than drawn as ~1200 individual per-province <path> elements.
+    // That single-path, single-fill-operation approach mirrors exactly what
+    // buildGlobeReliefLayer() does for the globe's own landmask (see its
+    // "ALREADY-DISSOLVED continent/nation shapes" comment) and for the same
+    // reason: ~1200 independently-anti-aliased adjacent <path> elements each
+    // show a faint seam of partial coverage along every shared province
+    // border, which - because the terrain filter's final step keys its own
+    // alpha off this exact silhouette - showed up as every single province
+    // outline being faintly traced onto the finished terrain instead of it
+    // reading as one continuous landmass. A continent or nation whose merge
+    // itself failed falls back to its own provinces' individual (still
+    // seam-prone, but never simply missing) geometry, same fallback used
+    // elsewhere in this file. Islands are kept as their own small, separate
+    // <path> elements (each needs its own transform, which a single 'd'
+    // string can't carry) - fine because islands are isolated landmasses
+    // that never share a border with the mainland or each other, so there's
+    // no seam for a separate element to introduce.
+    const landDParts = [];
+    const failedLandContinents = {};
+    (typeof CONTINENTS !== 'undefined' ? CONTINENTS : []).forEach(function(c){
+      if (continentFullFlatPathById[c.id]){
+        landDParts.push(continentFullFlatPathById[c.id]);
+      } else {
+        failedLandContinents[c.id] = true;
+      }
+    });
+    features.forEach(function(f){
+      if (f.nationName) return; // claimed - handled by the nation merge below
+      const base = baseById[f.id];
+      if (base && failedLandContinents[base.continent]) landDParts.push(base.d);
+    });
+    Object.keys(claimsByName).forEach(function(nationName){
+      const path = nationFlatPathByName[nationName];
+      if (path){
+        landDParts.push(path);
+      } else {
+        features.filter(function(f){ return f.nationName === nationName; }).forEach(function(f){
+          const base = baseById[f.id];
+          if (base) landDParts.push(base.d);
+        });
+      }
+    });
+    landG.appendChild(svgEl('path', { d: landDParts.join(' '), fill: '#000000', 'fill-rule': 'nonzero' }));
+    ISLAND_LIST.forEach(function(isl){
+      const attrs = isl.transform ? { d: isl.d, transform: isl.transform, fill: '#000000' } : { d: isl.d, fill: '#000000' };
+      landG.appendChild(svgEl('path', attrs));
+    });
 
     // Same procedural terrain recipe as buildGlobeReliefLayer's
     // 'globe-terrain' filter, just re-targeted at the flat map's own
@@ -1501,9 +1749,28 @@
     });
     flatSvg.appendChild(gLakes);
 
+    // Modern's reference grid, drawn on top of everything (land, water,
+    // claims) rather than under it like the rhumb lines - see
+    // buildFlatGraticule()'s own comment for why.
+    graticuleGroup = buildFlatGraticule();
+    graticuleGroup.style.display = (currentThemeName() === 'modern') ? '' : 'none';
+    flatSvg.appendChild(graticuleGroup);
+
     paperTextureGroup = buildPaperTexture();
     paperTextureGroup.style.display = (currentThemeName() === 'parchment') ? '' : 'none';
     flatSvg.appendChild(paperTextureGroup);
+
+    // Capital marker last (topmost) - a fresh, still-unpositioned copy
+    // every rebuild, so a theme switch that rebuilds this SVG while a
+    // nation is already selected needs its position/visibility restored;
+    // see the updateCapitalMarker() call this function's caller chain
+    // already goes through (buildFlatMap() itself is only ever called from
+    // boot() and refreshGlobeTheme(), both of which call
+    // repaintOwnershipColors() -> applySelectionHighlight() -> that
+    // function afterward), so nothing further is needed here beyond
+    // creating the element.
+    flatCapitalMarkerG = buildCapitalMarker(1);
+    flatSvg.appendChild(flatCapitalMarkerG);
   }
 
   // ---- Flat map zoom & pan (same pattern as map.js) ----
@@ -1669,6 +1936,20 @@
     return n ? { lon: sLon/n, lat: sLat/n } : { lon: 0, lat: 0 };
   }
 
+  // Great-circle angular distance (radians) between two lon/lat points -
+  // used only to decide whether the capital marker's point currently sits
+  // within the visible hemisphere (dist < PI/2, matching the projection's
+  // own .clipAngle(90) below) before placing it, since projection([lon,lat])
+  // happily returns a mirrored on-screen position for a point on the far
+  // side too rather than clipping it the way pathGen() clips a real path.
+  function angularDistance(lon1, lat1, lon2, lat2){
+    const toRad = Math.PI / 180;
+    const p1 = lat1 * toRad, p2 = lat2 * toRad;
+    const dLat = (lat2 - lat1) * toRad, dLon = (lon2 - lon1) * toRad;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dLon / 2) ** 2;
+    return 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   let renderScheduled = false;
   function scheduleGlobeRender(){
     if (renderScheduled) return;
@@ -1702,6 +1983,21 @@
         globeLimbEl.setAttribute('cx', t[0]);
         globeLimbEl.setAttribute('cy', t[1]);
         globeLimbEl.setAttribute('r', s);
+      }
+      if (globeCapitalMarkerG){
+        if (globeCapitalLonLat){
+          const rotate = projection.rotate();
+          const visible = angularDistance(globeCapitalLonLat[0], globeCapitalLonLat[1], -rotate[0], -rotate[1]) < Math.PI / 2;
+          const xy = visible ? projection(globeCapitalLonLat) : null;
+          if (xy){
+            globeCapitalMarkerG.setAttribute('transform', 'translate(' + xy[0].toFixed(1) + ',' + xy[1].toFixed(1) + ')');
+            globeCapitalMarkerG.style.display = '';
+          } else {
+            globeCapitalMarkerG.style.display = 'none';
+          }
+        } else {
+          globeCapitalMarkerG.style.display = 'none';
+        }
       }
     } catch (e){
       handleGlobeFailure(e);
@@ -1812,6 +2108,7 @@
       globeLandEl = null;
       globeLandFeatures = [];
       globeGraticuleEl = null;
+      globeRhumbLinesGroup = null;
       globeLimbEl = null;
 
       // Everything actually drawn (as opposed to <defs>) goes inside this
@@ -1827,6 +2124,14 @@
       } else {
         buildGlobeClassicLayer(landFeatures, globeZoomG);
       }
+
+      // Capital marker, common to both appearances (unlike the graticule/
+      // rhumb-lines pair, which are classic-only) - built fresh every
+      // rebuild, so its position is restored via the renderGlobe() call
+      // just below whenever globeCapitalLonLat is already set (e.g. a
+      // Relief<->classic switch while a nation is selected).
+      globeCapitalMarkerG = buildCapitalMarker(0.45);
+      globeZoomG.appendChild(globeCapitalMarkerG);
 
       applyGlobeZoom();
       globeReady = true;
@@ -2168,6 +2473,16 @@
     globeGraticuleEl = svgEl('path', { class: 'globe-graticule' });
     container.appendChild(globeGraticuleEl);
 
+    // Parchment's rhumb-line network, built here too (not just on the flat
+    // map) and toggled against globeGraticuleEl above by theme - see
+    // buildGlobeRhumbLines()'s own comment for how it's kept aligned with
+    // the sphere without needing per-frame reprojection.
+    globeRhumbLinesGroup = buildGlobeRhumbLines();
+    container.appendChild(globeRhumbLinesGroup);
+    const isParchmentNow = currentThemeName() === 'parchment';
+    globeGraticuleEl.style.display = isParchmentNow ? 'none' : '';
+    globeRhumbLinesGroup.style.display = isParchmentNow ? '' : 'none';
+
     const globeProvincesGroup = svgEl('g');
 
     // Solid ground for the whole continent - claimed territory included,
@@ -2340,9 +2655,17 @@
     const water = currentWaterColor();
     if (mapFrame) mapFrame.style.background = water;
 
-    const isParchment = currentThemeName() === 'parchment';
+    const themeNow = currentThemeName();
+    const isParchment = themeNow === 'parchment';
+    const isModern = themeNow === 'modern';
     if (rhumbLinesGroup) rhumbLinesGroup.style.display = isParchment ? '' : 'none';
     if (paperTextureGroup) paperTextureGroup.style.display = isParchment ? '' : 'none';
+    if (graticuleGroup) graticuleGroup.style.display = isModern ? '' : 'none';
+    // Globe: same rhumb-lines-vs-graticule swap as the flat map above, but
+    // only exists while the globe is in its classic layer - both are null
+    // in Relief mode (see buildGlobeView()'s reset), so guard on that too.
+    if (globeGraticuleEl) globeGraticuleEl.style.display = isParchment ? 'none' : '';
+    if (globeRhumbLinesGroup) globeRhumbLinesGroup.style.display = isParchment ? '' : 'none';
 
     // Lakes are set via inline style rather than the 'fill' attribute (see
     // buildFlatMap()), so update that same property here - otherwise they'd
@@ -2381,6 +2704,13 @@
     if (globeSphereEl && currentGlobeMode() === 'classic'){
       globeSphereEl.style.fill = water;
     }
+    // A Relief<->classic switch rebuilds one or both SVGs from scratch
+    // (buildFlatMap()/buildGlobeView() above), which discards any .picked
+    // class and the capital marker along with everything else - restore
+    // both for whatever's still selected. A same-mode theme switch (the
+    // common case) doesn't rebuild anything, so this is just a harmless
+    // no-op re-application then.
+    applySelectionHighlight();
   }
 
   // theme.js calls this after switching the Appearance theme (same

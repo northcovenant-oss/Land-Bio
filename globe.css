@@ -33,6 +33,13 @@
 /* ---------- Flat map + globe stages (reuse .map-frame svg sizing from style.css) ---------- */
 .globe-frame{
   overflow: hidden;
+  /* No decorative frame here (unlike the claim map's .map-frame, which
+     keeps its own border/outline/shadow) - this page's own title block,
+     projection toggle and Appearance dropdown already read as the page
+     chrome, so the flat map/globe itself renders edge-to-edge. */
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 .flat-stage, .globe-stage{
   position: absolute;
@@ -86,6 +93,23 @@ path.unclaimed-hitbox{ cursor: pointer; }
  * vs. d3-geo's own path rendering).
  */
 path.continent-shape{ pointer-events: none; }
+
+/*
+ * Dark Mode: continents/islands (both flat and globe - [data-continent] is
+ * set on every landmass shape either projection draws, see buildFlatClassicContent()/
+ * buildGlobeClassicLayer() in globe.js) get a white coastline outline so
+ * they still read as land against the equally-black ocean/continent-interior
+ * fill (tintForContinent() and --water, both black in this theme) - "black on
+ * black" would otherwise be indistinguishable without it. Specificity here
+ * (class + attribute + theme class) deliberately beats the plain
+ * path.nation-province{stroke:none} rule above.
+ */
+body.theme-dark path.nation-province[data-continent]{
+  stroke: #ffffff;
+  stroke-width: 1.1;
+  stroke-opacity: 0.9;
+  stroke-linejoin: round;
+}
 
 /*
  * Relief's ownership overlay (both the flat map and the globe): with the
@@ -230,12 +254,6 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   background: rgba(0,0,0,0.05);
   border: 1px solid var(--line);
   color: var(--ink);
-}
-.nation-card .nc-province-chip.capital{
-  background: var(--gold);
-  color: #fff;
-  border-color: var(--gold);
-  font-weight: 600;
 }
 .nation-card .nc-unclaimed{
   font-style: italic;
