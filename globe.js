@@ -977,19 +977,14 @@
     // claim.capital, which is a province label (e.g. "S9") and belongs on
     // the map/claim side, not here.
     const capitalName = sheet && sheet.capital;
-    const areaLabel = formatAreaKm2(nationAreaKm2(nationName));
 
     let html = '';
     if (sheet && sheet.classification) html += '<div class="nc-classification">' + escapeHtml(sheet.classification) + '</div>';
     html += '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
-    const subLines = [];
-    if (capitalName) subLines.push('Capital: ' + escapeHtml(capitalName));
-    if (areaLabel) subLines.push(escapeHtml(areaLabel));
-    if (subLines.length) html += '<div class="nc-sub">' + subLines.join('<br>') + '</div>';
+    if (capitalName) html += '<div class="nc-sub">Capital: ' + escapeHtml(capitalName) + '</div>';
 
     if (sheet){
       if (sheet.factbook || sheet.application){
-        html += '<div class="nc-section">Links</div>';
         html += '<div class="nc-links">' +
           linkRow('Factbook', sheet.factbook) +
           linkRow('Application', sheet.application) +
