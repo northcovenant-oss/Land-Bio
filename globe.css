@@ -58,6 +58,37 @@
 #globeSvg .globe-graticule{ fill:none; stroke: rgba(0,0,0,0.08); stroke-width: 0.5; }
 
 /*
+ * Modern & Parchment: globe.js sets #mapFrame's own background to the exact
+ * same water color the sphere itself is filled with (currentWaterColor()),
+ * so on the globe view the sphere's circular edge had nothing to read
+ * against - it just faded into an identically-colored surrounding frame.
+ * Giving the globe stage its own backdrop (the site's neutral page tone
+ * instead of the ocean hue) keeps that inline match intact for the flat
+ * map's own edge-to-edge ocean look, while making the globe actually read
+ * as a sphere floating in front of something else. Scoped to Parchment/
+ * Modern only - Relief's terrain texture already reads fine against the
+ * matching frame, and Dark gets a border treatment instead (below).
+ */
+body:not(.theme-modern):not(.theme-relief):not(.theme-dark) .globe-stage{
+  background: var(--parchment);
+}
+body.theme-modern .globe-stage{
+  background: var(--parchment);
+}
+
+/*
+ * Dark Mode: ocean and the space around the globe are both pure black
+ * (--water), so the sphere had no visible edge at all. A white ring gives
+ * it a horizon line the way the flat map's white coastlines already do for
+ * land against black water/continent interiors.
+ */
+body.theme-dark #globeSvg .globe-sphere{
+  stroke: #ffffff;
+  stroke-width: 3;
+  stroke-opacity: 0.85;
+}
+
+/*
  * No per-province stroke by default: adjacent provinces belonging to the
  * same nation already share one solid fill color, so leaving the outline
  * off makes them read as a single claimed region instead of a patchwork
