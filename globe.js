@@ -820,15 +820,47 @@
   // 3. Land Bio Data sheet (richer per-nation fields for the info panel)
   // =========================================================================
 
-  // TODO: fill this in with the "Rylet Land Bio Data" sheet's own tab
-  // (the one row-per-nation tab with Timestamp/Nation/Classification/...)
-  // "Publish to web" CSV link - File > Share > Publish to web > select
-  // that tab > CSV. Same requirement as CLAIMS_SHEET_CSV_URL in claims.js:
-  // the plain /export?format=csv route is unreliable (CORS) once actually
-  // deployed, so use the published-CSV feed instead. Left blank, the
-  // nation panel still works - it just skips the Overview/Specializations/
-  // Military sections and shows claim data only.
-  const LAND_BIO_SHEET_CSV_URL = '';
+  // Same "Admin Post" tab/sheet claims.js reads (its CLAIMS_SHEET_CSV_URL),
+  // and the same sideways layout: one column per nation, one row per field.
+  // Column A is a row label, real data starts at column B (FIRST_DATA_COLUMN).
+  // "Publish to web" CSV link - File > Share > Publish to web > select that
+  // tab > CSV. Confirmed live via direct fetch on 2026-09-29:
+  //   Row 1  Timestamp
+  //   Row 2  Nation                    <- NATION_ROW
+  //   Row 3  Classification            <- CLASSIFICATION_ROW
+  //   Row 4  Capital                   <- CAPITAL_ROW
+  //   Row 5  Government Type           <- GOVERNMENT_TYPE_ROW
+  //   Row 6  Landbio Economy           <- ECONOMY_ROW
+  //   Row 7  GDP                       <- GDP_ROW
+  //   Row 8  Food Production           <- FOOD_PRODUCTION_ROW
+  //   Row 9  Energy Production         <- ENERGY_PRODUCTION_ROW
+  //   Row 10 Population                <- POPULATION_ROW
+  //   Rows 11-22  Specializations/Military (not wired yet - starting with
+  //               rows 2-10 and 25-26 per initial request; add ROW indices
+  //               below once these are ready to surface)
+  //   Row 23 Claim Code (claims.js's own CLAIM_CODE_ROW_INDEX = 22)
+  //   Row 24 Hex Color                 <- COLOR_ROW (Modern theme nation fill)
+  //   Row 25 Factbook                  <- FACTBOOK_ROW
+  //   Row 26 Application               <- APPLICATION_ROW
+  const LAND_BIO_SHEET_CSV_URL =
+    'https://docs.google.com/spreadsheets/d/e/2PACX-1vR7W_8C-QWQO6AmHUYrvI4FdlyTMRV3qe65QIF-abGoH_YZRexNYMvCQQfLyJPWM_vQn_x26rVS_xmF/pub?gid=1336017158&single=true&output=csv';
+
+  const FIRST_DATA_COLUMN = 1; // column B (0-indexed) - column A is a row label, not data
+
+  const LAND_BIO_ROWS = {
+    nation: 1,
+    classification: 2,
+    capital: 3,
+    governmentType: 4,
+    economy: 5,
+    gdp: 6,
+    foodProduction: 7,
+    energyProduction: 8,
+    population: 9,
+    color: 23,
+    factbook: 24,
+    application: 25,
+  };
 
   function parseCsvLine(line){
     const result = [];
@@ -851,55 +883,6 @@
     return result;
   }
 
-  function normalizeHeader(s){
-    return String(s || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-
-  // Matched by normalized header name rather than column index, so this
-  // survives the sheet's columns being reordered or having fields inserted
-  // - the exact bug class documented in claims.js (Claim Code's row shifting
-  // when Classification/Capital/Government Type were added ahead of it).
-  const FIELD_ALIASES = {
-    nation: ['nation'],
-    classification: ['classification'],
-    capital: ['capital'],
-    governmentType: ['governmenttype'],
-    economy: ['landbioeconomy', 'economy', 'economytype'],
-    gdp: ['gdp', 'totalgdp'],
-    foodProduction: ['foodproduction'],
-    energyProduction: ['energyproduction'],
-    population: ['population'],
-    spec1: ['1stspecialization'],
-    spec2: ['2ndspecialization'],
-    spec3: ['3rdspecialization'],
-    spec4: ['4thspecialization'],
-    spec5: ['5thspecialization'],
-    militaryPriority: ['militarypriority'],
-    nationalStance: ['nationalstance'],
-    navy: ['navy'],
-    army: ['army'],
-    airforce: ['airforce'],
-    expeditionary: ['expeditionaryforces'],
-    paramilitary: ['paramilitarymilitiagendarmes'],
-    // Only used by the Modern theme's nation coloring (computeNationColors
-    // above) - any CSS color the sheet owner wants to enter (a hex code
-    // like "#3a6b8f", or a named color like "steelblue") is passed straight
-    // through as an SVG fill/stroke value.
-    color: ['color', 'landbiocolor', 'nationcolor', 'mapcolor'],
-  };
-
-  function buildHeaderIndex(headerRow){
-    const normalized = headerRow.map(normalizeHeader);
-    const index = {};
-    Object.keys(FIELD_ALIASES).forEach(function(key){
-      const aliases = FIELD_ALIASES[key];
-      for (let i = 0; i < normalized.length; i++){
-        if (aliases.indexOf(normalized[i]) !== -1){ index[key] = i; break; }
-      }
-    });
-    return index;
-  }
-
   function fetchLandBioSheet(){
     if (!LAND_BIO_SHEET_CSV_URL){
       return Promise.resolve({ rows: {}, configured: false, error: null });
@@ -907,34 +890,36 @@
     return fetch(LAND_BIO_SHEET_CSV_URL, { cache: 'no-store' })
       .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.text(); })
       .then(function(csvText){
-        const rows = csvText.split(/\r?\n/).map(parseCsvLine).filter(function(r){ return r.length > 1; });
-        if (rows.length < 2){
-          console.warn('[Map] Land Bio Data sheet loaded but had no data rows.');
-          return { rows: {}, configured: true, error: null };
-        }
-        const idx = buildHeaderIndex(rows[0]);
+        const rows = csvText.split(/\r?\n/).map(parseCsvLine);
+        const nameRow = rows[LAND_BIO_ROWS.nation] || [];
         const byNation = {};
-        for (let r = 1; r < rows.length; r++){
-          const row = rows[r];
-          function get(key){ return idx[key] !== undefined ? (row[idx[key]] || '').trim() : ''; }
-          const nationName = get('nation');
+        function cell(rowIndex, col){
+          const row = rows[rowIndex];
+          return row ? (row[col] || '').trim() : '';
+        }
+        for (let col = FIRST_DATA_COLUMN; col < nameRow.length; col++){
+          const nationName = (nameRow[col] || '').trim();
           if (!nationName) continue;
           byNation[nationName.toUpperCase()] = {
             nation: nationName,
-            classification: get('classification'),
-            capital: get('capital'),
-            governmentType: get('governmentType'),
-            economy: get('economy'),
-            gdp: get('gdp'),
-            foodProduction: get('foodProduction'),
-            energyProduction: get('energyProduction'),
-            population: get('population'),
-            specializations: [get('spec1'), get('spec2'), get('spec3'), get('spec4'), get('spec5')].filter(Boolean),
-            militaryPriority: get('militaryPriority'),
-            nationalStance: get('nationalStance'),
-            navy: get('navy'), army: get('army'), airforce: get('airforce'),
-            expeditionary: get('expeditionary'), paramilitary: get('paramilitary'),
-            color: get('color'),
+            classification: cell(LAND_BIO_ROWS.classification, col),
+            capital: cell(LAND_BIO_ROWS.capital, col),
+            governmentType: cell(LAND_BIO_ROWS.governmentType, col),
+            economy: cell(LAND_BIO_ROWS.economy, col),
+            gdp: cell(LAND_BIO_ROWS.gdp, col),
+            foodProduction: cell(LAND_BIO_ROWS.foodProduction, col),
+            energyProduction: cell(LAND_BIO_ROWS.energyProduction, col),
+            population: cell(LAND_BIO_ROWS.population, col),
+            specializations: [],
+            militaryPriority: '', nationalStance: '',
+            navy: '', army: '', airforce: '', expeditionary: '', paramilitary: '',
+            // Modern theme's nation coloring (computeNationColors above) -
+            // any CSS color the sheet owner enters (a hex code like
+            // "#3a6b8f", or a named color like "steelblue") is passed
+            // straight through as an SVG fill/stroke value.
+            color: cell(LAND_BIO_ROWS.color, col),
+            factbook: cell(LAND_BIO_ROWS.factbook, col),
+            application: cell(LAND_BIO_ROWS.application, col),
           };
         }
         console.log('[Map] Loaded land bio data for ' + Object.keys(byNation).length + ' nation(s).');
@@ -960,6 +945,15 @@
     if (!value) return '';
     return '<p class="nc-field"><span class="nc-field-label">' + escapeHtml(label) + ':</span> ' +
       '<span class="nc-field-value">' + escapeHtml(value) + '</span></p>';
+  }
+
+  // Same as fieldRow, but the value renders as a clickable link (used for
+  // the sheet's Factbook/Application URL fields, rows 25-26).
+  function fieldLinkRow(label, url){
+    if (!url) return '';
+    const safeUrl = escapeHtml(url);
+    return '<p class="nc-field"><span class="nc-field-label">' + escapeHtml(label) + ':</span> ' +
+      '<a class="nc-field-value nc-field-link" href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">' + safeUrl + '</a></p>';
   }
 
   function renderUnclaimedPanel(p){
@@ -1017,6 +1011,12 @@
         html += fieldRow('Airforce', sheet.airforce);
         html += fieldRow('Expeditionary Forces', sheet.expeditionary);
         html += fieldRow('Paramilitary / Militia / Gendarmes', sheet.paramilitary);
+      }
+
+      if (sheet.factbook || sheet.application){
+        html += '<div class="nc-section">Links</div>';
+        html += fieldLinkRow('Factbook', sheet.factbook);
+        html += fieldLinkRow('Application', sheet.application);
       }
     } else if (landBioConfigured) {
       html += '<div class="nc-sheet-missing">No land bio data sheet entry found for this nation yet.</div>';
@@ -1284,10 +1284,9 @@
   // straightforward here (unlike the globe) because the flat map already
   // IS an equirectangular projection (see toLonLat()/VB_W/VB_H above), so a
   // meridian/parallel is just a straight vertical/horizontal line at a
-  // fixed fraction of the viewBox. Every 20 degrees, drawn on TOP of
-  // everything (unlike the rhumb lines, which sit under the land) - a
-  // reference grid customarily marks over land and sea alike, faint enough
-  // not to compete with the claim colors underneath it.
+  // fixed fraction of the viewBox. Every 20 degrees, drawn UNDER the land
+  // (same stacking as the rhumb lines - see buildFlatMap()) so it only
+  // shows over open water, not crossing over every continent and claim.
   function buildFlatGraticule(){
     const g = svgEl('g', { class: 'flat-graticule' });
     g.style.pointerEvents = 'none';
@@ -1725,12 +1724,21 @@
     flatBuiltMode = currentGlobeMode();
 
     // Chart dressing first, so every landmass drawn afterward paints over
-    // it - built unconditionally (cheap: a few dozen lines/shapes, no
-    // filters) and just hidden outside Parchment, see
-    // repaintOwnershipColors()'s theme check below.
+    // it and only the ocean shows the lines underneath - built
+    // unconditionally (cheap: a few dozen lines/shapes, no filters) and
+    // just hidden outside its own theme, see repaintOwnershipColors()'s
+    // theme check below. Modern's reference grid sits here now (it used to
+    // be drawn on top of everything, which meant it crossed straight over
+    // every continent and claim instead of reading as a background
+    // graticule under the water only, the way the rhumb lines already do
+    // for Parchment) - see buildFlatGraticule()'s own comment.
     rhumbLinesGroup = buildRhumbLines();
     rhumbLinesGroup.style.display = (currentThemeName() === 'parchment') ? '' : 'none';
     flatSvg.appendChild(rhumbLinesGroup);
+
+    graticuleGroup = buildFlatGraticule();
+    graticuleGroup.style.display = (currentThemeName() === 'modern') ? '' : 'none';
+    flatSvg.appendChild(graticuleGroup);
 
     if (flatBuiltMode === 'relief'){
       buildFlatReliefContent();
@@ -1748,13 +1756,6 @@
       gLakes.appendChild(el);
     });
     flatSvg.appendChild(gLakes);
-
-    // Modern's reference grid, drawn on top of everything (land, water,
-    // claims) rather than under it like the rhumb lines - see
-    // buildFlatGraticule()'s own comment for why.
-    graticuleGroup = buildFlatGraticule();
-    graticuleGroup.style.display = (currentThemeName() === 'modern') ? '' : 'none';
-    flatSvg.appendChild(graticuleGroup);
 
     paperTextureGroup = buildPaperTexture();
     paperTextureGroup.style.display = (currentThemeName() === 'parchment') ? '' : 'none';

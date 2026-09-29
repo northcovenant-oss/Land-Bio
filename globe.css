@@ -230,6 +230,12 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   margin-right: 4px;
 }
 .nation-card .nc-field-value{ font-weight: 600; }
+.nation-card .nc-field-link{
+  word-break: break-all;
+  color: var(--gold);
+  text-decoration: none;
+}
+.nation-card .nc-field-link:hover{ text-decoration: underline; }
 .nation-card .nc-section{
   font-family: var(--font-display);
   font-size: 12px;
