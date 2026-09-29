@@ -1133,7 +1133,10 @@
     if (!props.nationName){
       tooltip.innerHTML = 'Unclaimed';
     } else {
-      tooltip.innerHTML = escapeHtml(props.label) + '<div class="sub">Claimed by ' + escapeHtml(props.nationName) + '</div>';
+      const sheet = landBioByName[props.nationName.toUpperCase()];
+      const classification = sheet && sheet.classification;
+      tooltip.innerHTML = (classification ? '<div class="sub">' + escapeHtml(classification) + '</div>' : '') +
+        escapeHtml(props.label);
     }
     tooltip.style.left = (e.clientX - rect.left) + 'px';
     tooltip.style.top = (e.clientY - rect.top) + 'px';
