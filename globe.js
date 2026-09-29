@@ -973,18 +973,29 @@
     panelTitle.textContent = '';
     panelHint.textContent = '';
 
-    const capital = claim && claim.capital;
+    // The actual capital city name (sheet.capital, e.g. "Test City") - not
+    // claim.capital, which is a province label (e.g. "S9") and belongs on
+    // the map/claim side, not here.
+    const capitalName = sheet && sheet.capital;
     const areaLabel = formatAreaKm2(nationAreaKm2(nationName));
 
     let html = '';
     if (sheet && sheet.classification) html += '<div class="nc-classification">' + escapeHtml(sheet.classification) + '</div>';
     html += '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
-    const subParts = [];
-    if (capital) subParts.push('Capital: ' + escapeHtml(capital));
-    if (areaLabel) subParts.push(escapeHtml(areaLabel));
-    if (subParts.length) html += '<div class="nc-sub">' + subParts.join(' &middot; ') + '</div>';
+    const subLines = [];
+    if (capitalName) subLines.push('Capital: ' + escapeHtml(capitalName));
+    if (areaLabel) subLines.push(escapeHtml(areaLabel));
+    if (subLines.length) html += '<div class="nc-sub">' + subLines.join('<br>') + '</div>';
 
     if (sheet){
+      if (sheet.factbook || sheet.application){
+        html += '<div class="nc-section">Links</div>';
+        html += '<div class="nc-links">' +
+          linkRow('Factbook', sheet.factbook) +
+          linkRow('Application', sheet.application) +
+          '</div>';
+      }
+
       html += '<div class="nc-section">Overview</div>';
       html += fieldRow('Government Type', sheet.governmentType);
       html += fieldRow('Economy Type', sheet.economy);
@@ -1010,14 +1021,6 @@
         html += fieldRow('Airforce', sheet.airforce);
         html += fieldRow('Expeditionary Forces', sheet.expeditionary);
         html += fieldRow('Paramilitary / Militia / Gendarmes', sheet.paramilitary);
-      }
-
-      if (sheet.factbook || sheet.application){
-        html += '<div class="nc-section">Links</div>';
-        html += '<div class="nc-links">' +
-          linkRow('Factbook', sheet.factbook) +
-          linkRow('Application', sheet.application) +
-          '</div>';
       }
     } else if (landBioConfigured) {
       html += '<div class="nc-sheet-missing">No land bio data sheet entry found for this nation yet.</div>';
