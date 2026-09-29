@@ -162,6 +162,11 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   color: var(--ink);
   padding-right: 22px;
 }
+/* Nation panels build their own title (nc-classification/nc-name) inside
+   nationCard instead, so the shared #panelTitle/#panelHint are left empty
+   for those and collapsed here - renderUnclaimedPanel() still uses them
+   normally for a plain province label. */
+.info-popup h2:empty{ display:none; margin:0; }
 .info-popup .desc{
   font-size: 12.5px;
   color: var(--ink-soft);
@@ -201,6 +206,13 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
 /* ---------- Nation info content ---------- */
 .nation-card{}
 
+.nation-card .nc-classification{
+  font-size: 11.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 3px;
+}
 .nation-card .nc-name{
   font-family: var(--font-display);
   font-size: 21px;
@@ -230,12 +242,25 @@ path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
   margin-right: 4px;
 }
 .nation-card .nc-field-value{ font-weight: 600; }
-.nation-card .nc-field-link{
-  word-break: break-all;
+/* Links section (Factbook/Application, rows 25-26): the field label itself
+   is the clickable link - see linkRow() in globe.js - so these render as a
+   simple row of link "chips" instead of label/value pairs. */
+.nation-card .nc-links{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.nation-card .nc-link{
+  font-size: 13px;
+  font-weight: 600;
   color: var(--gold);
   text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
 }
-.nation-card .nc-field-link:hover{ text-decoration: underline; }
+.nation-card .nc-link:hover{ text-decoration: underline; background: rgba(0,0,0,0.04); }
 .nation-card .nc-section{
   font-family: var(--font-display);
   font-size: 12px;

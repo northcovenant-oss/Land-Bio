@@ -947,13 +947,12 @@
       '<span class="nc-field-value">' + escapeHtml(value) + '</span></p>';
   }
 
-  // Same as fieldRow, but the value renders as a clickable link (used for
-  // the sheet's Factbook/Application URL fields, rows 25-26).
-  function fieldLinkRow(label, url){
+  // Used for the sheet's Factbook/Application URL fields (rows 25-26): the
+  // label itself is the clickable link text, not the raw address - e.g.
+  // "Factbook" links out to the URL rather than printing it on the page.
+  function linkRow(label, url){
     if (!url) return '';
-    const safeUrl = escapeHtml(url);
-    return '<p class="nc-field"><span class="nc-field-label">' + escapeHtml(label) + ':</span> ' +
-      '<a class="nc-field-value nc-field-link" href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">' + safeUrl + '</a></p>';
+    return '<a class="nc-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(label) + '</a>';
   }
 
   function renderUnclaimedPanel(p){
@@ -971,22 +970,22 @@
   function renderNationPanel(nationName){
     const claim = claimsByName[nationName];
     const sheet = landBioByName[nationName.toUpperCase()];
-    panelTitle.textContent = nationName;
-    panelHint.textContent = 'Territory and land bio data for this nation.';
+    panelTitle.textContent = '';
+    panelHint.textContent = '';
 
-    const provinces = (claim && claim.provinces) || [];
     const capital = claim && claim.capital;
     const areaLabel = formatAreaKm2(nationAreaKm2(nationName));
 
-    let html = '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
-    html += '<div class="nc-sub">' + provinces.length + ' province' + (provinces.length === 1 ? '' : 's') +
-      ' claimed' +
-      (areaLabel ? ' &middot; ' + escapeHtml(areaLabel) : '') +
-      (capital ? ' &middot; Capital: ' + escapeHtml(capital) : '') + '</div>';
+    let html = '';
+    if (sheet && sheet.classification) html += '<div class="nc-classification">' + escapeHtml(sheet.classification) + '</div>';
+    html += '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
+    const subParts = [];
+    if (capital) subParts.push('Capital: ' + escapeHtml(capital));
+    if (areaLabel) subParts.push(escapeHtml(areaLabel));
+    if (subParts.length) html += '<div class="nc-sub">' + subParts.join(' &middot; ') + '</div>';
 
     if (sheet){
       html += '<div class="nc-section">Overview</div>';
-      html += fieldRow('Classification', sheet.classification);
       html += fieldRow('Government Type', sheet.governmentType);
       html += fieldRow('Economy Type', sheet.economy);
       html += fieldRow('Total GDP', sheet.gdp);
@@ -1015,8 +1014,10 @@
 
       if (sheet.factbook || sheet.application){
         html += '<div class="nc-section">Links</div>';
-        html += fieldLinkRow('Factbook', sheet.factbook);
-        html += fieldLinkRow('Application', sheet.application);
+        html += '<div class="nc-links">' +
+          linkRow('Factbook', sheet.factbook) +
+          linkRow('Application', sheet.application) +
+          '</div>';
       }
     } else if (landBioConfigured) {
       html += '<div class="nc-sheet-missing">No land bio data sheet entry found for this nation yet.</div>';
