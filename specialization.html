@@ -217,13 +217,18 @@
         <input type="text" id="identityGovernment" placeholder="e.g. Constitutional Monarchy, Parliamentary Republic">
       </div>
 
+      <h3 class="mil-subheading">Potential Imports</h3>
+      <div class="spec-chosen-summary" id="potentialImportsList"><!-- populated by specialization.js --></div>
+
       <h3 class="mil-subheading">Your Claim Map</h3>
       <p class="step-intro">A snapshot of your claimed provinces, carried over from your land bio - download it to attach
         as an image in your application.</p>
+      <div class="claim-map-color-row">
+        <label for="claimMapColorPicker">Highlight Color</label>
+        <input type="color" id="claimMapColorPicker" value="#e0a83e">
+        <input type="text" id="claimMapColorHex" class="claim-map-hex-input" value="#e0a83e" placeholder="#e0a83e" maxlength="7" autocomplete="off" spellcheck="false">
+      </div>
       <div class="claim-map-section" id="claimMapDisplay"><!-- populated by specialization.js --></div>
-
-      <h3 class="mil-subheading">Potential Imports</h3>
-      <div class="spec-chosen-summary" id="potentialImportsList"><!-- populated by specialization.js --></div>
 
       <h3 class="mil-subheading">Next Steps</h3>
       <p class="step-intro">Send your Application to <a href="https://www.nationstates.net/nation=rylet" target="_blank" rel="noopener">Rylet</a> to await approval.</p>

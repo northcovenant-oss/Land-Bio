@@ -916,11 +916,18 @@
         const translated = { minX: pbb.minX+bb.tx, minY: pbb.minY+bb.ty, maxX: pbb.maxX+bb.tx, maxY: pbb.maxY+bb.ty };
         if(!bboxesOverlap(translated, cropRect)) return;
       }
+      // claim-fill/claim-context classes are hooks, not styling - the
+      // specialization page's color picker finds claimed provinces (and
+      // the capital seal below) by these class names to recolor them
+      // client-side after this markup has already been baked in and
+      // handed off, without needing to know anything about how the SVG
+      // was built.
+      const cls = isClaimed ? 'claim-fill' : 'claim-context';
       const strokeCls = isClaimed
         ? 'stroke="#e0a83e" stroke-width="1.6"'
         : 'stroke="#2c2417" stroke-width="0.5"';
       const fill = isClaimed ? claimFill : neutralFill;
-      paths += `<path d="${p.d}" fill="${fill}" ${strokeCls}/>`;
+      paths += `<path class="${cls}" d="${p.d}" fill="${fill}" ${strokeCls}/>`;
     });
     LAKE_LIST.forEach(function(l){
       if(l.continent === continentName) paths += `<path d="${l.d}" fill="${WATER}"/>`;
@@ -929,13 +936,15 @@
     // Capital star - same circle+star-glyph seal used on the live map
     // (render()'s seal-capital), just drawn as static inline SVG here
     // rather than through CSS classes, so it survives being lifted out of
-    // this page and rasterized to PNG.
+    // this page and rasterized to PNG. The circle carries claim-fill too
+    // (same recolor hook as the provinces above) so the picker on the
+    // specialization page keeps the seal matching the claim's color.
     let sealMarkup = '';
     const capitalProvince = capitalId && byId[capitalId];
     const capitalCenter = capitalProvince && centroid(capitalProvince.d);
     if(capitalCenter){
       sealMarkup = `<g class="claim-capital-seal">` +
-        `<circle cx="${capitalCenter.x}" cy="${capitalCenter.y}" r="6.4" fill="${claimFill}" stroke="#f4ead7" stroke-width="0.6"/>` +
+        `<circle class="claim-fill" cx="${capitalCenter.x}" cy="${capitalCenter.y}" r="6.4" fill="${claimFill}" stroke="#f4ead7" stroke-width="0.6"/>` +
         `<text x="${capitalCenter.x}" y="${capitalCenter.y}" font-size="7.5" fill="#f4ead7" font-weight="700" ` +
         `text-anchor="middle" dominant-baseline="central">★</text></g>`;
     }

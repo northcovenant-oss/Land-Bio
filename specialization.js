@@ -1179,6 +1179,63 @@
       });
       shot.appendChild(btn);
     });
+
+    initClaimMapColorPicker(row);
+  }
+
+  // ---- Step 5: claim map color picker ----
+  //
+  // map.js marks every claimed province path (and the capital seal) with
+  // a "claim-fill" class specifically so this page can find and recolor
+  // them after the SVG has already been baked into snapshot.claimMapHtml
+  // - the color picker and hex box here just set that attribute directly
+  // on the live DOM elements, and the download button (above) rasterizes
+  // whatever the SVG currently looks like, so a recolor always carries
+  // through to the downloaded PNG.
+  function normalizeHexColor(raw){
+    const s = String(raw || '').trim().replace(/^#/, '');
+    if(/^[0-9a-f]{6}$/i.test(s)) return '#' + s.toLowerCase();
+    if(/^[0-9a-f]{3}$/i.test(s)){
+      return '#' + s.toLowerCase().split('').map(function(c){ return c + c; }).join('');
+    }
+    return null;
+  }
+
+  function initClaimMapColorPicker(row){
+    const colorPicker = document.getElementById('claimMapColorPicker');
+    const hexInput = document.getElementById('claimMapColorHex');
+    if(!colorPicker || !hexInput) return;
+
+    const claimFillEls = row.querySelectorAll('.claim-fill');
+    if(claimFillEls.length === 0) return; // nothing to recolor (e.g. no capital, no claimed provinces somehow)
+
+    // Starting color is whatever map.js already baked in (the theme's
+    // gold), not a hardcoded default, so the picker reflects the map
+    // exactly as shown before anyone touches it.
+    const currentFill = normalizeHexColor(claimFillEls[0].getAttribute('fill')) || '#e0a83e';
+    colorPicker.value = currentFill;
+    hexInput.value = currentFill;
+
+    function applyColor(hex){
+      claimFillEls.forEach(function(elm){ elm.setAttribute('fill', hex); });
+    }
+
+    colorPicker.addEventListener('input', function(){
+      hexInput.value = colorPicker.value;
+      hexInput.classList.remove('invalid');
+      applyColor(colorPicker.value);
+    });
+
+    hexInput.addEventListener('input', function(){
+      const normalized = normalizeHexColor(hexInput.value);
+      if(!normalized){
+        hexInput.classList.add('invalid');
+        return;
+      }
+      hexInput.classList.remove('invalid');
+      colorPicker.value = normalized;
+      applyColor(normalized);
+    });
   }
 
   // ---- Step 5: potential imports for the 5 chosen specializations ----
