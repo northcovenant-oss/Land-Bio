@@ -505,6 +505,35 @@
   function buildClaimMapHtml(provinces){
     if(!provinces.length) return '';
     const byContinent = {};
+    CONTINENT_ORDER.forEach(function(c){ byContinent[c] = []; });
+    provinces.forEach(function(p){
+      (byContinent[p.continent] || byContinent[CONTINENT_ORDER[0]]).push(p.id);
+    });
+
+    const shots = [];
+    CONTINENT_ORDER.forEach(function(continentName){
+      const ids = byContinent[continentName];
+      if(!ids || !ids.length) return;
+      const svg = buildClaimSnapshotSVG(continentName, ids);
+      if(!svg) return;
+      const label = CONTINENT_LABELS[continentName] || continentName;
+      shots.push('<div class="map-shot">' + svg + '<div class="map-shot-label">' + label + '</div></div>');
+    });
+
+    if(!shots.length) return '';
+    return '    <div class="claim-map"><div class="map-row">' + shots.join('') + '</div></div>\n';
+  }
+
+  // Same idea as buildClaimMapHtml above, but for the SEPARATE snapshot
+  // handed off to the specialization page (see the "claimMapHandoffData"
+  // JSON script tag in writeBioPage) - tighter-cropped, claimed provinces
+  // filled in, capital star included. Kept as its own function rather
+  // than folded into buildClaimMapHtml/buildClaimSnapshotSVG so the bio
+  // page's own visible map stays exactly as it always has, and only the
+  // specialization identity page's copy gets the enhanced treatment.
+  function buildClaimHandoffMapHtml(provinces){
+    if(!provinces.length) return '';
+    const byContinent = {};
     const capitalByContinent = {};
     CONTINENT_ORDER.forEach(function(c){ byContinent[c] = []; });
     provinces.forEach(function(p){
@@ -517,14 +546,14 @@
     CONTINENT_ORDER.forEach(function(continentName){
       const ids = byContinent[continentName];
       if(!ids || !ids.length) return;
-      const svg = buildClaimSnapshotSVG(continentName, ids, capitalByContinent[continentName] || null);
+      const svg = buildClaimHandoffSnapshotSVG(continentName, ids, capitalByContinent[continentName] || null);
       if(!svg) return;
       const label = CONTINENT_LABELS[continentName] || continentName;
       shots.push('<div class="map-shot">' + svg + '<div class="map-shot-label">' + label + '</div></div>');
     });
 
     if(!shots.length) return '';
-    return '    <div class="claim-map"><div class="map-row">' + shots.join('') + '</div></div>\n';
+    return shots.join('');
   }
 
   generateBtn.addEventListener('click', function(){
@@ -633,6 +662,10 @@
         }).join('\n');
 
     const mapHtml = loading ? '' : buildClaimMapHtml(provinces);
+    // Enhanced (tighter-cropped, filled, capital-starred) copy - never
+    // shown on this page, only embedded as hidden data below for the
+    // specialization identity step to pick up. See buildClaimHandoffMapHtml.
+    const claimMapHandoffHtml = loading ? '' : buildClaimHandoffMapHtml(provinces);
 
     const html = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
       '<title>Land Bio' + (provinces.length ? ' \u2014 ' + escapeHtml(provinces[0].label) + (provinces.length > 1 ? ' +' + (provinces.length - 1) : '') : '') + '</title>\n' +
@@ -697,7 +730,8 @@
       (loading ? '' : '    <div class="bio-actions"><button id="continueToSpecBtn" class="btn-primary">Continue to National Specialization &rarr;</button>' +
                        '<button id="copyBbcBtn">Copy BBC Code</button></div>\n' +
                        '    <textarea id="bbcSource" readonly>' + escapeHtml(bbcCode) + '</textarea>\n' +
-                       '    <script type="application/json" id="perProvinceEnergyData">' + JSON.stringify((result && result.perProvinceEnergy) || []) + '</script>\n') +
+                       '    <script type="application/json" id="perProvinceEnergyData">' + JSON.stringify((result && result.perProvinceEnergy) || []) + '</script>\n' +
+                       '    <script type="application/json" id="claimMapHandoffData">' + JSON.stringify(claimMapHandoffHtml) + '</script>\n') +
       '    <div class="claim-code-block">\n' +
       '      <div class="cc-title">Claim Code &mdash; paste this into "Load a Claim Code" on the map to recreate this exact selection</div>\n' +
       '      <div class="claim-code-value" id="claimCodeValue">' + escapeHtml(claimCode) + '</div>\n' +
@@ -765,7 +799,7 @@
       '          worldExports: worldExportsRanking(),\n' +
       '          claimCode: (function(){ var el = document.getElementById("claimCodeValue"); return el ? el.textContent.trim() : ""; })(),\n' +
       '          perProvinceEnergy: (function(){ var el = document.getElementById("perProvinceEnergyData"); try { return el ? JSON.parse(el.textContent) : []; } catch(e){ return []; } })(),\n' +
-      '          claimMapHtml: (function(){ var el = document.querySelector(".claim-map .map-row"); return el ? el.innerHTML : ""; })(),\n' +
+      '          claimMapHtml: (function(){ var el = document.getElementById("claimMapHandoffData"); try { return el ? JSON.parse(el.textContent) : ""; } catch(e){ return ""; } })(),\n' +
       '        };\n' +
       '        try {\n' +
       '          localStorage.setItem("landClaimSpecializationSnapshot", JSON.stringify(snapshot));\n' +
@@ -842,10 +876,79 @@
     return { minX, minY, maxX, maxY };
   }
 
+  // Bounding box (in shared page coordinates, i.e. after applying that
+  // continent's transform) of every province belonging to one continent.
+  // Computed once per continent and cached, since it only depends on the
+  // static province geometry.
+  const continentBBoxCache = {};
+  function getContinentBBox(continentName){
+    if(continentBBoxCache[continentName]) return continentBBoxCache[continentName];
+    const tfStr = CONTINENT_TRANSFORMS[continentName];
+    const m = tfStr && tfStr.match(/translate\(([-\d.]+),([-\d.]+)\)/);
+    const tx = m ? parseFloat(m[1]) : 0;
+    const ty = m ? parseFloat(m[2]) : 0;
+
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    PROVINCES.forEach(function(p){
+      if(p.continent !== continentName) return;
+      const bb = pathBBox(p.d);
+      if(!bb) return;
+      minX = Math.min(minX, bb.minX+tx);
+      minY = Math.min(minY, bb.minY+ty);
+      maxX = Math.max(maxX, bb.maxX+tx);
+      maxY = Math.max(maxY, bb.maxY+ty);
+    });
+    const result = { minX, minY, maxX, maxY, tx, ty };
+    continentBBoxCache[continentName] = result;
+    return result;
+  }
+
+  // Builds a small self-contained inline SVG showing one continent, with
+  // its claimed provinces highlighted the same way they are on the main
+  // map (gold outline). Used to embed a "map of your claim" image on the
+  // generated bio page.
+  function buildClaimSnapshotSVG(continentName, claimedIds){
+    const bb = getContinentBBox(continentName);
+    if(!isFinite(bb.minX)) return '';
+    const pad = (bb.maxX-bb.minX) * 0.06;
+    const x = bb.minX-pad, y = bb.minY-pad;
+    const w = (bb.maxX-bb.minX)+pad*2, h = (bb.maxY-bb.minY)+pad*2;
+
+    const claimedSet = {};
+    claimedIds.forEach(function(id){ claimedSet[id]=true; });
+
+    // Blank "Provinces" look for every shape (same neutral fill claimed or
+    // not) - claimed provinces are distinguished only by the gold outline,
+    // matching how selection reads on the live map's Provinces tab.
+    const neutralFill = getNeutralFill();
+    let paths = '';
+    PROVINCES.forEach(function(p){
+      if(p.continent !== continentName) return;
+      const isClaimed = !!claimedSet[p.id];
+      const strokeCls = isClaimed
+        ? 'stroke="#e0a83e" stroke-width="1.6"'
+        : 'stroke="#2c2417" stroke-width="0.5"';
+      paths += `<path d="${p.d}" fill="${neutralFill}" ${strokeCls}/>`;
+    });
+    LAKE_LIST.forEach(function(l){
+      if(l.continent === continentName) paths += `<path d="${l.d}" fill="${WATER}"/>`;
+    });
+
+    return `<svg viewBox="${bb.minX-pad} ${bb.minY-pad} ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="background:${WATER}">` +
+      `<g transform="translate(${bb.tx},${bb.ty})">${paths}</g></svg>`;
+  }
+
+  // ---- Specialization-page-only claim snapshot (handoff copy) ----
+  //
+  // Everything below builds the ENHANCED version of the claim snapshot -
+  // tightly cropped to the claim itself, claimed provinces filled in
+  // (not just outlined), and a capital star - used ONLY for the copy
+  // handed off to the specialization identity page (see
+  // "claimMapHandoffData" in writeBioPage). The bio page's own visible
+  // map above (buildClaimSnapshotSVG) is untouched by any of this.
+
   // Reads the current theme's highlight color live, same pattern as
-  // getNeutralFill() - used to actually fill claimed provinces in the
-  // claim snapshot SVG (see buildClaimSnapshotSVG) rather than relying on
-  // stroke color alone to carry that meaning.
+  // getNeutralFill().
   function getClaimFill(){
     return getComputedStyle(document.body).getPropertyValue('--gold-bright').trim() || '#e0a83e';
   }
@@ -858,8 +961,8 @@
   // continent's transform) of just the CLAIMED provinces - not the whole
   // continent. A claim is usually a small cluster in one corner of a
   // continent that can have hundreds of provinces, so cropping to the
-  // claim itself (plus padding) is what keeps the snapshot image from
-  // being mostly blank space.
+  // claim itself (plus padding) is what keeps this version of the
+  // snapshot from being mostly blank space.
   function getClaimBBox(continentName, claimedIds){
     const tfStr = CONTINENT_TRANSFORMS[continentName];
     const m = tfStr && tfStr.match(/translate\(([-\d.]+),([-\d.]+)\)/);
@@ -882,11 +985,10 @@
 
   // Builds a small self-contained inline SVG showing just the claimed
   // provinces (plus their immediate neighbors for context), highlighted
-  // the same way they are on the main map (gold outline) and now also
+  // the same way they are on the main map (gold outline) and also
   // gold-filled for visibility, with a star seal on the capital if one
-  // was marked. Used to embed a "map of your claim" image on the
-  // generated bio page and the specialization page's identity step.
-  function buildClaimSnapshotSVG(continentName, claimedIds, capitalId){
+  // was marked. Used only for the specialization page's identity step.
+  function buildClaimHandoffSnapshotSVG(continentName, claimedIds, capitalId){
     const bb = getClaimBBox(continentName, claimedIds);
     if(!isFinite(bb.minX)) return '';
     const rawW = bb.maxX-bb.minX, rawH = bb.maxY-bb.minY;
@@ -916,11 +1018,18 @@
         const translated = { minX: pbb.minX+bb.tx, minY: pbb.minY+bb.ty, maxX: pbb.maxX+bb.tx, maxY: pbb.maxY+bb.ty };
         if(!bboxesOverlap(translated, cropRect)) return;
       }
+      // claim-fill/claim-context classes are hooks, not styling - the
+      // specialization page's color picker finds claimed provinces (and
+      // the capital seal below) by these class names to recolor them
+      // client-side after this markup has already been baked in and
+      // handed off, without needing to know anything about how the SVG
+      // was built.
+      const cls = isClaimed ? 'claim-fill' : 'claim-context';
       const strokeCls = isClaimed
         ? 'stroke="#e0a83e" stroke-width="1.6"'
         : 'stroke="#2c2417" stroke-width="0.5"';
       const fill = isClaimed ? claimFill : neutralFill;
-      paths += `<path d="${p.d}" fill="${fill}" ${strokeCls}/>`;
+      paths += `<path class="${cls}" d="${p.d}" fill="${fill}" ${strokeCls}/>`;
     });
     LAKE_LIST.forEach(function(l){
       if(l.continent === continentName) paths += `<path d="${l.d}" fill="${WATER}"/>`;
@@ -929,13 +1038,15 @@
     // Capital star - same circle+star-glyph seal used on the live map
     // (render()'s seal-capital), just drawn as static inline SVG here
     // rather than through CSS classes, so it survives being lifted out of
-    // this page and rasterized to PNG.
+    // this page and rasterized to PNG. The circle carries claim-fill too
+    // (same recolor hook as the provinces above) so the picker on the
+    // specialization page keeps the seal matching the claim's color.
     let sealMarkup = '';
     const capitalProvince = capitalId && byId[capitalId];
     const capitalCenter = capitalProvince && centroid(capitalProvince.d);
     if(capitalCenter){
       sealMarkup = `<g class="claim-capital-seal">` +
-        `<circle cx="${capitalCenter.x}" cy="${capitalCenter.y}" r="6.4" fill="${claimFill}" stroke="#f4ead7" stroke-width="0.6"/>` +
+        `<circle class="claim-fill" cx="${capitalCenter.x}" cy="${capitalCenter.y}" r="6.4" fill="${claimFill}" stroke="#f4ead7" stroke-width="0.6"/>` +
         `<text x="${capitalCenter.x}" y="${capitalCenter.y}" font-size="7.5" fill="#f4ead7" font-weight="700" ` +
         `text-anchor="middle" dominant-baseline="central">★</text></g>`;
     }
