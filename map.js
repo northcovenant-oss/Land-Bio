@@ -505,16 +505,19 @@
   function buildClaimMapHtml(provinces){
     if(!provinces.length) return '';
     const byContinent = {};
+    const capitalByContinent = {};
     CONTINENT_ORDER.forEach(function(c){ byContinent[c] = []; });
     provinces.forEach(function(p){
-      (byContinent[p.continent] || byContinent[CONTINENT_ORDER[0]]).push(p.id);
+      const continentKey = byContinent[p.continent] ? p.continent : CONTINENT_ORDER[0];
+      byContinent[continentKey].push(p.id);
+      if(p.isCapital) capitalByContinent[continentKey] = p.id;
     });
 
     const shots = [];
     CONTINENT_ORDER.forEach(function(continentName){
       const ids = byContinent[continentName];
       if(!ids || !ids.length) return;
-      const svg = buildClaimSnapshotSVG(continentName, ids);
+      const svg = buildClaimSnapshotSVG(continentName, ids, capitalByContinent[continentName] || null);
       if(!svg) return;
       const label = CONTINENT_LABELS[continentName] || continentName;
       shots.push('<div class="map-shot">' + svg + '<div class="map-shot-label">' + label + '</div></div>');
@@ -839,21 +842,34 @@
     return { minX, minY, maxX, maxY };
   }
 
+  // Reads the current theme's highlight color live, same pattern as
+  // getNeutralFill() - used to actually fill claimed provinces in the
+  // claim snapshot SVG (see buildClaimSnapshotSVG) rather than relying on
+  // stroke color alone to carry that meaning.
+  function getClaimFill(){
+    return getComputedStyle(document.body).getPropertyValue('--gold-bright').trim() || '#e0a83e';
+  }
+
+  function bboxesOverlap(a, b){
+    return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+  }
+
   // Bounding box (in shared page coordinates, i.e. after applying that
-  // continent's transform) of every province belonging to one continent.
-  // Computed once per continent and cached, since it only depends on the
-  // static province geometry.
-  const continentBBoxCache = {};
-  function getContinentBBox(continentName){
-    if(continentBBoxCache[continentName]) return continentBBoxCache[continentName];
+  // continent's transform) of just the CLAIMED provinces - not the whole
+  // continent. A claim is usually a small cluster in one corner of a
+  // continent that can have hundreds of provinces, so cropping to the
+  // claim itself (plus padding) is what keeps the snapshot image from
+  // being mostly blank space.
+  function getClaimBBox(continentName, claimedIds){
     const tfStr = CONTINENT_TRANSFORMS[continentName];
     const m = tfStr && tfStr.match(/translate\(([-\d.]+),([-\d.]+)\)/);
     const tx = m ? parseFloat(m[1]) : 0;
     const ty = m ? parseFloat(m[2]) : 0;
 
     let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-    PROVINCES.forEach(function(p){
-      if(p.continent !== continentName) return;
+    claimedIds.forEach(function(id){
+      const p = byId[id];
+      if(!p || p.continent !== continentName) return;
       const bb = pathBBox(p.d);
       if(!bb) return;
       minX = Math.min(minX, bb.minX+tx);
@@ -861,44 +877,71 @@
       maxX = Math.max(maxX, bb.maxX+tx);
       maxY = Math.max(maxY, bb.maxY+ty);
     });
-    const result = { minX, minY, maxX, maxY, tx, ty };
-    continentBBoxCache[continentName] = result;
-    return result;
+    return { minX, minY, maxX, maxY, tx, ty };
   }
 
-  // Builds a small self-contained inline SVG showing one continent, with
-  // its claimed provinces highlighted the same way they are on the main
-  // map (gold outline). Used to embed a "map of your claim" image on the
-  // generated bio page.
-  function buildClaimSnapshotSVG(continentName, claimedIds){
-    const bb = getContinentBBox(continentName);
+  // Builds a small self-contained inline SVG showing just the claimed
+  // provinces (plus their immediate neighbors for context), highlighted
+  // the same way they are on the main map (gold outline) and now also
+  // gold-filled for visibility, with a star seal on the capital if one
+  // was marked. Used to embed a "map of your claim" image on the
+  // generated bio page and the specialization page's identity step.
+  function buildClaimSnapshotSVG(continentName, claimedIds, capitalId){
+    const bb = getClaimBBox(continentName, claimedIds);
     if(!isFinite(bb.minX)) return '';
-    const pad = (bb.maxX-bb.minX) * 0.06;
+    const rawW = bb.maxX-bb.minX, rawH = bb.maxY-bb.minY;
+    // Padding scales with the claim's own size, plus a fixed floor so a
+    // one- or two-province claim doesn't crop in so tight the shape reads
+    // as an abstract blob with no surrounding context.
+    const pad = Math.max(rawW, rawH) * 0.18 + 14;
     const x = bb.minX-pad, y = bb.minY-pad;
-    const w = (bb.maxX-bb.minX)+pad*2, h = (bb.maxY-bb.minY)+pad*2;
+    const w = rawW+pad*2, h = rawH+pad*2;
+    const cropRect = { minX:x, minY:y, maxX:x+w, maxY:y+h };
 
     const claimedSet = {};
     claimedIds.forEach(function(id){ claimedSet[id]=true; });
 
-    // Blank "Provinces" look for every shape (same neutral fill claimed or
-    // not) - claimed provinces are distinguished only by the gold outline,
-    // matching how selection reads on the live map's Provinces tab.
     const neutralFill = getNeutralFill();
+    const claimFill = getClaimFill();
     let paths = '';
     PROVINCES.forEach(function(p){
       if(p.continent !== continentName) return;
       const isClaimed = !!claimedSet[p.id];
+      // Neighboring, unclaimed provinces are only drawn if they actually
+      // fall within the cropped view - no point carrying the rest of the
+      // continent's geometry into an SVG that will never show it.
+      if(!isClaimed){
+        const pbb = pathBBox(p.d);
+        if(!pbb) return;
+        const translated = { minX: pbb.minX+bb.tx, minY: pbb.minY+bb.ty, maxX: pbb.maxX+bb.tx, maxY: pbb.maxY+bb.ty };
+        if(!bboxesOverlap(translated, cropRect)) return;
+      }
       const strokeCls = isClaimed
         ? 'stroke="#e0a83e" stroke-width="1.6"'
         : 'stroke="#2c2417" stroke-width="0.5"';
-      paths += `<path d="${p.d}" fill="${neutralFill}" ${strokeCls}/>`;
+      const fill = isClaimed ? claimFill : neutralFill;
+      paths += `<path d="${p.d}" fill="${fill}" ${strokeCls}/>`;
     });
     LAKE_LIST.forEach(function(l){
       if(l.continent === continentName) paths += `<path d="${l.d}" fill="${WATER}"/>`;
     });
 
-    return `<svg viewBox="${bb.minX-pad} ${bb.minY-pad} ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="background:${WATER}">` +
-      `<g transform="translate(${bb.tx},${bb.ty})">${paths}</g></svg>`;
+    // Capital star - same circle+star-glyph seal used on the live map
+    // (render()'s seal-capital), just drawn as static inline SVG here
+    // rather than through CSS classes, so it survives being lifted out of
+    // this page and rasterized to PNG.
+    let sealMarkup = '';
+    const capitalProvince = capitalId && byId[capitalId];
+    const capitalCenter = capitalProvince && centroid(capitalProvince.d);
+    if(capitalCenter){
+      sealMarkup = `<g class="claim-capital-seal">` +
+        `<circle cx="${capitalCenter.x}" cy="${capitalCenter.y}" r="6.4" fill="${claimFill}" stroke="#f4ead7" stroke-width="0.6"/>` +
+        `<text x="${capitalCenter.x}" y="${capitalCenter.y}" font-size="7.5" fill="#f4ead7" font-weight="700" ` +
+        `text-anchor="middle" dominant-baseline="central">★</text></g>`;
+    }
+
+    return `<svg viewBox="${x} ${y} ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="background:${WATER}">` +
+      `<g transform="translate(${bb.tx},${bb.ty})">${paths}${sealMarkup}</g></svg>`;
   }
 
   render();
