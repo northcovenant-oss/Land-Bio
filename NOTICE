@@ -3,12 +3,8 @@ NOTICE — Split Licensing
 This repository contains two distinct categories of material:
 
 1. THE TOOL (MIT Licensed)
-   - All .html, .css and .js files: index.html, specialization.html,
-     globe.html, admin.html, style.css, specialization.css, globe.css,
-     admin.css, map.js, landbio.js, theme.js, claims.js, specialization.js,
-     globe.js, admin.js
-   - The general structure, schema, and logic of data.js and
-     specialization-data.js
+   - index.html, style.css, map.js, landbio.js
+   - The general structure, schema, and logic of data.js
    These files are open source under the MIT License (see LICENSE). You're
    welcome to fork, adapt, and reuse this map/land-claim tool for your own
    community or project, including commercially, with attribution.
@@ -17,8 +13,6 @@ This repository contains two distinct categories of material:
    - The specific contents of data.js: province shapes, boundaries, names,
      and numbering; climate zone data and categorization; economic-output
      categorization; and any other setting-specific values
-   - The specific contents of specialization-data.js: the specialization
-     pools, military list, import table, and their pairings
    - Source map files (SVG province map, climate raster, and any other
      world map assets), whether included in this repo or referenced by it
    - Any lore, place names, or narrative material tied to this world
@@ -31,10 +25,5 @@ This repository contains two distinct categories of material:
    covers it — it doesn't.
 
 If you fork this repository to build a similar tool for your own world, the
-expected approach is: keep the MIT-licensed code, and replace data.js,
-specialization-data.js, and the source map files with your own content.
-
-3. THIRD-PARTY CODE
-   - vendor/d3-geo.min.js (d3-geo, d3-array, internmap) is under the ISC
-     License, Copyright Mike Bostock - see vendor/LICENSE-d3-geo.txt.
-     It is not covered by either section above.
+expected approach is: keep the MIT-licensed code, and replace data.js (and
+the source map files) with your own content.
