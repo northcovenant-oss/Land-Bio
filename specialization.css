@@ -10,11 +10,39 @@ html, body {
 }
 
 body.spec-page {
+  position: relative;
   min-height: 100vh;
   min-height: 100dvh;
   background: var(--parchment);
   padding: 32px 20px 60px;
   box-sizing: border-box;
+}
+
+.credit-link {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  max-width: 220px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  text-decoration: none;
+  text-align: right;
+}
+.credit-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+@media (max-width: 560px) {
+  .credit-link {
+    position: static;
+    display: block;
+    max-width: none;
+    text-align: center;
+    margin-bottom: 12px;
+  }
 }
 
 .spec-wrap {
@@ -409,21 +437,6 @@ body.spec-page {
   color: var(--ink-soft);
   margin-bottom: 6px;
 }
-.adjust-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.adjust-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  background: var(--panel-bg);
-  color: var(--ink-soft);
-  font-size: 16px;
-  cursor: not-allowed;
-}
 .adjust-value {
   font-family: var(--font-body);
   font-weight: 600;
@@ -560,13 +573,13 @@ body.spec-page {
   color: var(--ink);
   box-sizing: border-box;
 }
-#copyCitizenCardBtn {
+#copyFullApplicationBtn {
   margin-left: 0;
 }
-#copyCitizenCardBtn.copied {
+#copyFullApplicationBtn.copied {
   background: var(--gold-bright, var(--gold));
 }
-#citizenCardSource {
+#fullApplicationSource {
   width: 100%;
   min-height: 260px;
   margin-top: 10px;

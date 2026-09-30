@@ -11,6 +11,11 @@
   const generateBtn = document.getElementById('generateBtn');
 
   const NS = 'http://www.w3.org/2000/svg';
+  // Sea and lakes share one water colour: the shallow-water blue of the topography map.
+  // (WATER_COLOR in data.js can override it.)
+  const WATER = (typeof WATER_COLOR !== 'undefined') ? WATER_COLOR : '#bae3ff';
+  if (mapFrame) mapFrame.style.background = WATER;
+  if (svg) svg.style.background = WATER;
 
   // ---- Layers ----
   function getNeutralFill(){
@@ -24,7 +29,9 @@
     { id: 'provinces', label: 'Provinces', type: 'neutral' },
     { id: 'economic',  label: 'Economic Output', type: 'data' },
     { id: 'climate',   label: 'Climate', type: 'climate' },
-    { id: 'terrain',   label: 'Terrain', type: 'placeholder' }
+    // Terrain shows the topography image (TERRAIN_IMAGE in data.js) under the
+    // province borders; without an image it falls back to the placeholder hatch.
+    { id: 'terrain',   label: 'Terrain', type: (typeof TERRAIN_IMAGE !== 'undefined') ? 'image' : 'placeholder' }
   ];
   let activeLayer = LAYERS[0];
 
@@ -49,24 +56,73 @@
   defs.appendChild(pattern);
   svg.appendChild(defs);
 
-  const g = document.createElementNS(NS, 'g');
-  g.setAttribute('transform', NORTH_TRANSFORM);
-  svg.appendChild(g);
+  // ---- Continents ----
+  // data.js lists its continents in CONTINENTS = [{ id, label, transform }].
+  // Older data files only had NORTH_TRANSFORM / SOUTH_TRANSFORM, so fall back
+  // to those when CONTINENTS isn't defined.
+  const CONTINENT_LIST = (typeof CONTINENTS !== 'undefined') ? CONTINENTS : [
+    { id: 'north', label: 'Northern Continent', transform: (typeof NORTH_TRANSFORM !== 'undefined') ? NORTH_TRANSFORM : '' },
+    { id: 'south', label: 'Southern Continent', transform: (typeof SOUTH_TRANSFORM !== 'undefined') ? SOUTH_TRANSFORM : '' },
+    { id: 'southcentral', label: 'South Central Continent', transform: (typeof SOUTHCENTRAL_TRANSFORM !== 'undefined') ? SOUTHCENTRAL_TRANSFORM : '' }
+  ];
 
-  const gSouth = document.createElementNS(NS, 'g');
-  if(SOUTH_TRANSFORM){ gSouth.setAttribute('transform', SOUTH_TRANSFORM); }
-  svg.appendChild(gSouth);
+  // Land that has no provinces yet (whole continents still to be divided):
+  // drawn underneath everything, greyed out, visible on every layer, never clickable.
+  const gPending = document.createElementNS(NS, 'g');
+  svg.appendChild(gPending);
 
-  function groupFor(p){ return p.continent === 'south' ? gSouth : g; }
+  // Topography backdrop for the Terrain layer (hidden on the other layers).
+  let terrainImageFailed = false;
+  const gTerrain = document.createElementNS(NS, 'g');
+  gTerrain.style.display = 'none';
+  if(typeof TERRAIN_IMAGE !== 'undefined'){
+    const im = document.createElementNS(NS, 'image');
+    im.setAttribute('href', TERRAIN_IMAGE.href);
+    im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', TERRAIN_IMAGE.href);
+    im.setAttribute('x', TERRAIN_IMAGE.x); im.setAttribute('y', TERRAIN_IMAGE.y);
+    im.setAttribute('width', TERRAIN_IMAGE.width); im.setAttribute('height', TERRAIN_IMAGE.height);
+    im.setAttribute('preserveAspectRatio', 'none');
+    im.style.pointerEvents = 'none';
+    // if the image can't be loaded, say so on the Terrain layer instead of failing silently
+    im.addEventListener('error', function(){
+      terrainImageFailed = true;
+      console.warn('Terrain image failed to load:', String(TERRAIN_IMAGE.href).slice(0, 80));
+      if(activeLayer && activeLayer.type === 'image'){ setLayer(activeLayer); }
+    });
+    gTerrain.appendChild(im);
+  }
+  svg.appendChild(gTerrain);
 
-  // Extra non-clickable, greyed islands (from raster, not in vector province data)
+  // One <g> per continent, each carrying that continent's own transform.
+  const CONTINENT_GROUPS = {}, CONTINENT_TRANSFORMS = {}, CONTINENT_LABELS = {};
+  const CONTINENT_ORDER = [];
+  CONTINENT_LIST.forEach(function(c){
+    const cg = document.createElementNS(NS, 'g');
+    if(c.transform){ cg.setAttribute('transform', c.transform); }
+    svg.appendChild(cg);
+    CONTINENT_GROUPS[c.id] = cg;
+    CONTINENT_TRANSFORMS[c.id] = c.transform || '';
+    CONTINENT_LABELS[c.id] = c.label || c.id;
+    CONTINENT_ORDER.push(c.id);
+  });
+  const g = CONTINENT_GROUPS[CONTINENT_ORDER[0]];
+  const LAKE_LIST = (typeof LAKES !== 'undefined') ? LAKES : [];
+  // Claim seals are sized in map units; SEAL_SIZE (data.js) scales them to suit
+  // how big provinces are in this map's coordinate space.
+  const SEAL_SCALE = (typeof SEAL_SIZE !== 'undefined') ? SEAL_SIZE : 1;
+
+  function groupFor(p){ return CONTINENT_GROUPS[p.continent] || g; }
+
+  // Extra non-clickable, greyed land: small islands (shown on the Provinces
+  // layer only) and pending continents (always shown, in gPending).
   const gExtra = document.createElementNS(NS, 'g');
   svg.appendChild(gExtra);
   EXTRA_ISLANDS.forEach(function(isl){
     const el = document.createElementNS(NS, 'path');
     el.setAttribute('d', isl.d);
-    el.setAttribute('class', 'extra-island');
-    gExtra.appendChild(el);
+    if(isl.transform){ el.setAttribute('transform', isl.transform); }
+    el.setAttribute('class', 'extra-island' + (isl.pending ? ' pending-land' : ''));
+    (isl.pending ? gPending : gExtra).appendChild(el);
   });
 
   // selection order: array of province ids, in click order
@@ -85,6 +141,17 @@
     el.addEventListener('mouseleave', hideTooltip);
     groupFor(p).appendChild(el);
     provinceEls[p.id] = el;
+  });
+
+  // Lakes sit on top of the provinces (which already have matching holes cut
+  // in them) purely as water colour - they're not clickable.
+  LAKE_LIST.forEach(function(l){
+    const el = document.createElementNS(NS, 'path');
+    el.setAttribute('d', l.d);
+    el.setAttribute('class', 'lake');
+    el.style.fill = WATER;
+    el.style.pointerEvents = 'none';
+    (CONTINENT_GROUPS[l.continent] || g).appendChild(el);
   });
 
   const byId = {};
@@ -195,21 +262,31 @@
       if(layer.type === 'data'){ fill = p.fill; }
       else if(layer.type === 'neutral'){ fill = getNeutralFill(); }
       else if(layer.type === 'climate'){
-        fill = p.climate ? CLIMATE_COLOR[p.climate.dominant] : '#cabf9e';
+        fill = p.climate ? CLIMATE_COLOR[p.climate.display || p.climate.dominant] : '#cabf9e';
       }
+      // see-through (but still clickable) so the topography shows beneath the borders
+      else if(layer.type === 'image'){ fill = 'rgba(0,0,0,0)'; }
       else { fill = 'url(#noDataHatch)'; }
       el.setAttribute('fill', fill);
     });
     applyTakenStyling();
-    noDataBanner.classList.toggle('show', layer.type === 'placeholder');
+    const imageMissing = layer.type === 'image' && terrainImageFailed;
+    noDataBanner.classList.toggle('show', layer.type === 'placeholder' || imageMissing);
     if(layer.type === 'placeholder'){
       noDataBanner.textContent = 'No ' + layer.label.toLowerCase() + ' data yet \u2014 this layer is a placeholder. Provinces are still selectable.';
+    } else if(imageMissing){
+      noDataBanner.textContent = 'The terrain image could not be loaded. Provinces are still selectable.';
     }
-    legend.classList.toggle('show', layer.type === 'data' || layer.type === 'climate');
+    const terrainLegend = (typeof TERRAIN_LEGEND !== 'undefined') ? TERRAIN_LEGEND : null;
+    legend.classList.toggle('show', layer.type === 'data' || layer.type === 'climate' || (layer.type === 'image' && !!terrainLegend));
     legend.innerHTML = '';
-    const activeLegendData = layer.type === 'climate' ? CLIMATE_LEGEND : (layer.type === 'data' ? ECON_LEGEND : null);
+    const activeLegendData = layer.type === 'climate' ? CLIMATE_LEGEND
+      : (layer.type === 'data' ? ECON_LEGEND : (layer.type === 'image' ? terrainLegend : null));
     if(activeLegendData){ buildLegend(activeLegendData, layer.type); }
     gExtra.style.display = (layer.id === 'provinces') ? '' : 'none';
+    // the topography image already shows all land, so the greyed placeholder land is hidden there
+    gTerrain.style.display = (layer.type === 'image') ? '' : 'none';
+    gPending.style.display = (layer.type === 'image') ? 'none' : '';
   }
 
   // ---- Legends ----
@@ -219,12 +296,12 @@
 
   function buildLegend(items, type){
     items.forEach(function(item){
-      const key = type === 'climate' ? item.climate : item.econ;
+      const key = type === 'climate' ? item.climate : (type === 'image' ? item.terrain : item.econ);
       const row = document.createElement('div');
       row.className = 'legend-row';
-      const present = type === 'climate'
-        ? PROVINCES.some(function(p){ return p.climate && p.climate.dominant === key; })
-        : PROVINCES.some(function(p){ return p.econ === key; });
+      const present = type === 'image' ? true : (type === 'climate'
+        ? PROVINCES.some(function(p){ return p.climate && (p.climate.display || p.climate.dominant) === key; })
+        : PROVINCES.some(function(p){ return p.econ === key; }));
       row.innerHTML =
         '<span class="legend-swatch" style="background:'+item.color+'"></span>' +
         '<span class="legend-label">'+key+'</span>' +
@@ -249,6 +326,10 @@
       } else {
         sub = 'No climate data';
       }
+    } else if(activeLayer.id === 'terrain' && p.geo && p.geo.elevation){
+      sub = Object.entries(p.geo.elevation)
+        .sort(function(a,b){ return b[1]-a[1]; })
+        .map(function(kv){ return kv[0]+' '+kv[1]+'%'; }).join(', ');
     } else {
       sub = selected.indexOf(p.id) !== -1 ? 'Claimed \u2014 click to release' : 'Click to claim';
     }
@@ -304,8 +385,9 @@
     });
 
     // seals (order badges, or a star for the capital) - remove old, redraw
-    Array.from(g.querySelectorAll('.seal')).forEach(function(n){ n.remove(); });
-    Array.from(gSouth.querySelectorAll('.seal')).forEach(function(n){ n.remove(); });
+    Object.keys(CONTINENT_GROUPS).forEach(function(k){
+      Array.from(CONTINENT_GROUPS[k].querySelectorAll('.seal')).forEach(function(n){ n.remove(); });
+    });
     selected.forEach(function(id, i){
       const p = byId[id];
       const c = centroid(p.d);
@@ -313,12 +395,12 @@
       const isCapital = id === capitalId;
       const seal = document.createElementNS(NS, 'g');
       seal.setAttribute('class', 'seal' + (isCapital ? ' seal-capital' : ''));
-      const r = isCapital ? 6.4 : 5.2;
+      const r = (isCapital ? 6.4 : 5.2) * SEAL_SCALE;
       const circle = document.createElementNS(NS, 'circle');
       circle.setAttribute('cx', c.x); circle.setAttribute('cy', c.y); circle.setAttribute('r', r);
       const text = document.createElementNS(NS, 'text');
       text.setAttribute('x', c.x); text.setAttribute('y', c.y);
-      text.setAttribute('font-size', isCapital ? '7.5' : '6.5');
+      text.setAttribute('font-size', String((isCapital ? 7.5 : 6.5) * SEAL_SCALE));
       text.textContent = isCapital ? '\u2605' : (i+1);
       seal.appendChild(circle);
       seal.appendChild(text);
@@ -422,23 +504,56 @@
   // side if it spans both.
   function buildClaimMapHtml(provinces){
     if(!provinces.length) return '';
-    const byContinent = { north: [], south: [] };
+    const byContinent = {};
+    CONTINENT_ORDER.forEach(function(c){ byContinent[c] = []; });
     provinces.forEach(function(p){
-      (byContinent[p.continent] || byContinent.north).push(p.id);
+      (byContinent[p.continent] || byContinent[CONTINENT_ORDER[0]]).push(p.id);
     });
 
     const shots = [];
-    ['north','south'].forEach(function(continentName){
+    CONTINENT_ORDER.forEach(function(continentName){
       const ids = byContinent[continentName];
       if(!ids || !ids.length) return;
       const svg = buildClaimSnapshotSVG(continentName, ids);
       if(!svg) return;
-      const label = continentName === 'north' ? 'Northern Continent' : 'Southern Continent';
+      const label = CONTINENT_LABELS[continentName] || continentName;
       shots.push('<div class="map-shot">' + svg + '<div class="map-shot-label">' + label + '</div></div>');
     });
 
     if(!shots.length) return '';
     return '    <div class="claim-map"><div class="map-row">' + shots.join('') + '</div></div>\n';
+  }
+
+  // Same idea as buildClaimMapHtml above, but for the SEPARATE snapshot
+  // handed off to the specialization page (see the "claimMapHandoffData"
+  // JSON script tag in writeBioPage) - tighter-cropped, claimed provinces
+  // filled in, capital star included. Kept as its own function rather
+  // than folded into buildClaimMapHtml/buildClaimSnapshotSVG so the bio
+  // page's own visible map stays exactly as it always has, and only the
+  // specialization identity page's copy gets the enhanced treatment.
+  function buildClaimHandoffMapHtml(provinces){
+    if(!provinces.length) return '';
+    const byContinent = {};
+    const capitalByContinent = {};
+    CONTINENT_ORDER.forEach(function(c){ byContinent[c] = []; });
+    provinces.forEach(function(p){
+      const continentKey = byContinent[p.continent] ? p.continent : CONTINENT_ORDER[0];
+      byContinent[continentKey].push(p.id);
+      if(p.isCapital) capitalByContinent[continentKey] = p.id;
+    });
+
+    const shots = [];
+    CONTINENT_ORDER.forEach(function(continentName){
+      const ids = byContinent[continentName];
+      if(!ids || !ids.length) return;
+      const svg = buildClaimHandoffSnapshotSVG(continentName, ids, capitalByContinent[continentName] || null);
+      if(!svg) return;
+      const label = CONTINENT_LABELS[continentName] || continentName;
+      shots.push('<div class="map-shot">' + svg + '<div class="map-shot-label">' + label + '</div></div>');
+    });
+
+    if(!shots.length) return '';
+    return shots.join('');
   }
 
   generateBtn.addEventListener('click', function(){
@@ -547,6 +662,10 @@
         }).join('\n');
 
     const mapHtml = loading ? '' : buildClaimMapHtml(provinces);
+    // Enhanced (tighter-cropped, filled, capital-starred) copy - never
+    // shown on this page, only embedded as hidden data below for the
+    // specialization identity step to pick up. See buildClaimHandoffMapHtml.
+    const claimMapHandoffHtml = loading ? '' : buildClaimHandoffMapHtml(provinces);
 
     const html = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
       '<title>Land Bio' + (provinces.length ? ' \u2014 ' + escapeHtml(provinces[0].label) + (provinces.length > 1 ? ' +' + (provinces.length - 1) : '') : '') + '</title>\n' +
@@ -611,7 +730,8 @@
       (loading ? '' : '    <div class="bio-actions"><button id="continueToSpecBtn" class="btn-primary">Continue to National Specialization &rarr;</button>' +
                        '<button id="copyBbcBtn">Copy BBC Code</button></div>\n' +
                        '    <textarea id="bbcSource" readonly>' + escapeHtml(bbcCode) + '</textarea>\n' +
-                       '    <script type="application/json" id="perProvinceEnergyData">' + JSON.stringify((result && result.perProvinceEnergy) || []) + '</script>\n') +
+                       '    <script type="application/json" id="perProvinceEnergyData">' + JSON.stringify((result && result.perProvinceEnergy) || []) + '</script>\n' +
+                       '    <script type="application/json" id="claimMapHandoffData">' + JSON.stringify(claimMapHandoffHtml) + '</script>\n') +
       '    <div class="claim-code-block">\n' +
       '      <div class="cc-title">Claim Code &mdash; paste this into "Load a Claim Code" on the map to recreate this exact selection</div>\n' +
       '      <div class="claim-code-value" id="claimCodeValue">' + escapeHtml(claimCode) + '</div>\n' +
@@ -679,6 +799,7 @@
       '          worldExports: worldExportsRanking(),\n' +
       '          claimCode: (function(){ var el = document.getElementById("claimCodeValue"); return el ? el.textContent.trim() : ""; })(),\n' +
       '          perProvinceEnergy: (function(){ var el = document.getElementById("perProvinceEnergyData"); try { return el ? JSON.parse(el.textContent) : []; } catch(e){ return []; } })(),\n' +
+      '          claimMapHtml: (function(){ var el = document.getElementById("claimMapHandoffData"); try { return el ? JSON.parse(el.textContent) : ""; } catch(e){ return ""; } })(),\n' +
       '        };\n' +
       '        try {\n' +
       '          localStorage.setItem("landClaimSpecializationSnapshot", JSON.stringify(snapshot));\n' +
@@ -762,7 +883,7 @@
   const continentBBoxCache = {};
   function getContinentBBox(continentName){
     if(continentBBoxCache[continentName]) return continentBBoxCache[continentName];
-    const tfStr = continentName === 'south' ? SOUTH_TRANSFORM : NORTH_TRANSFORM;
+    const tfStr = CONTINENT_TRANSFORMS[continentName];
     const m = tfStr && tfStr.match(/translate\(([-\d.]+),([-\d.]+)\)/);
     const tx = m ? parseFloat(m[1]) : 0;
     const ty = m ? parseFloat(m[2]) : 0;
@@ -809,9 +930,129 @@
         : 'stroke="#2c2417" stroke-width="0.5"';
       paths += `<path d="${p.d}" fill="${neutralFill}" ${strokeCls}/>`;
     });
+    LAKE_LIST.forEach(function(l){
+      if(l.continent === continentName) paths += `<path d="${l.d}" fill="${WATER}"/>`;
+    });
 
-    return `<svg viewBox="${bb.minX-pad} ${bb.minY-pad} ${w} ${h}" xmlns="http://www.w3.org/2000/svg">` +
+    return `<svg viewBox="${bb.minX-pad} ${bb.minY-pad} ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="background:${WATER}">` +
       `<g transform="translate(${bb.tx},${bb.ty})">${paths}</g></svg>`;
+  }
+
+  // ---- Specialization-page-only claim snapshot (handoff copy) ----
+  //
+  // Everything below builds the ENHANCED version of the claim snapshot -
+  // tightly cropped to the claim itself, claimed provinces filled in
+  // (not just outlined), and a capital star - used ONLY for the copy
+  // handed off to the specialization identity page (see
+  // "claimMapHandoffData" in writeBioPage). The bio page's own visible
+  // map above (buildClaimSnapshotSVG) is untouched by any of this.
+
+  // Reads the current theme's highlight color live, same pattern as
+  // getNeutralFill().
+  function getClaimFill(){
+    return getComputedStyle(document.body).getPropertyValue('--gold-bright').trim() || '#e0a83e';
+  }
+
+  function bboxesOverlap(a, b){
+    return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+  }
+
+  // Bounding box (in shared page coordinates, i.e. after applying that
+  // continent's transform) of just the CLAIMED provinces - not the whole
+  // continent. A claim is usually a small cluster in one corner of a
+  // continent that can have hundreds of provinces, so cropping to the
+  // claim itself (plus padding) is what keeps this version of the
+  // snapshot from being mostly blank space.
+  function getClaimBBox(continentName, claimedIds){
+    const tfStr = CONTINENT_TRANSFORMS[continentName];
+    const m = tfStr && tfStr.match(/translate\(([-\d.]+),([-\d.]+)\)/);
+    const tx = m ? parseFloat(m[1]) : 0;
+    const ty = m ? parseFloat(m[2]) : 0;
+
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    claimedIds.forEach(function(id){
+      const p = byId[id];
+      if(!p || p.continent !== continentName) return;
+      const bb = pathBBox(p.d);
+      if(!bb) return;
+      minX = Math.min(minX, bb.minX+tx);
+      minY = Math.min(minY, bb.minY+ty);
+      maxX = Math.max(maxX, bb.maxX+tx);
+      maxY = Math.max(maxY, bb.maxY+ty);
+    });
+    return { minX, minY, maxX, maxY, tx, ty };
+  }
+
+  // Builds a small self-contained inline SVG showing just the claimed
+  // provinces (plus their immediate neighbors for context), highlighted
+  // the same way they are on the main map (gold outline) and also
+  // gold-filled for visibility, with a star seal on the capital if one
+  // was marked. Used only for the specialization page's identity step.
+  function buildClaimHandoffSnapshotSVG(continentName, claimedIds, capitalId){
+    const bb = getClaimBBox(continentName, claimedIds);
+    if(!isFinite(bb.minX)) return '';
+    const rawW = bb.maxX-bb.minX, rawH = bb.maxY-bb.minY;
+    // Padding scales with the claim's own size, plus a fixed floor so a
+    // one- or two-province claim doesn't crop in so tight the shape reads
+    // as an abstract blob with no surrounding context.
+    const pad = Math.max(rawW, rawH) * 0.18 + 14;
+    const x = bb.minX-pad, y = bb.minY-pad;
+    const w = rawW+pad*2, h = rawH+pad*2;
+    const cropRect = { minX:x, minY:y, maxX:x+w, maxY:y+h };
+
+    const claimedSet = {};
+    claimedIds.forEach(function(id){ claimedSet[id]=true; });
+
+    const neutralFill = getNeutralFill();
+    const claimFill = getClaimFill();
+    let paths = '';
+    PROVINCES.forEach(function(p){
+      if(p.continent !== continentName) return;
+      const isClaimed = !!claimedSet[p.id];
+      // Neighboring, unclaimed provinces are only drawn if they actually
+      // fall within the cropped view - no point carrying the rest of the
+      // continent's geometry into an SVG that will never show it.
+      if(!isClaimed){
+        const pbb = pathBBox(p.d);
+        if(!pbb) return;
+        const translated = { minX: pbb.minX+bb.tx, minY: pbb.minY+bb.ty, maxX: pbb.maxX+bb.tx, maxY: pbb.maxY+bb.ty };
+        if(!bboxesOverlap(translated, cropRect)) return;
+      }
+      // claim-fill/claim-context classes are hooks, not styling - the
+      // specialization page's color picker finds claimed provinces (and
+      // the capital seal below) by these class names to recolor them
+      // client-side after this markup has already been baked in and
+      // handed off, without needing to know anything about how the SVG
+      // was built.
+      const cls = isClaimed ? 'claim-fill' : 'claim-context';
+      const strokeCls = isClaimed
+        ? 'stroke="#e0a83e" stroke-width="1.6"'
+        : 'stroke="#2c2417" stroke-width="0.5"';
+      const fill = isClaimed ? claimFill : neutralFill;
+      paths += `<path class="${cls}" d="${p.d}" fill="${fill}" ${strokeCls}/>`;
+    });
+    LAKE_LIST.forEach(function(l){
+      if(l.continent === continentName) paths += `<path d="${l.d}" fill="${WATER}"/>`;
+    });
+
+    // Capital star - same circle+star-glyph seal used on the live map
+    // (render()'s seal-capital), just drawn as static inline SVG here
+    // rather than through CSS classes, so it survives being lifted out of
+    // this page and rasterized to PNG. The circle carries claim-fill too
+    // (same recolor hook as the provinces above) so the picker on the
+    // specialization page keeps the seal matching the claim's color.
+    let sealMarkup = '';
+    const capitalProvince = capitalId && byId[capitalId];
+    const capitalCenter = capitalProvince && centroid(capitalProvince.d);
+    if(capitalCenter){
+      sealMarkup = `<g class="claim-capital-seal">` +
+        `<circle class="claim-fill" cx="${capitalCenter.x}" cy="${capitalCenter.y}" r="6.4" fill="${claimFill}" stroke="#f4ead7" stroke-width="0.6"/>` +
+        `<text x="${capitalCenter.x}" y="${capitalCenter.y}" font-size="7.5" fill="#f4ead7" font-weight="700" ` +
+        `text-anchor="middle" dominant-baseline="central">★</text></g>`;
+    }
+
+    return `<svg viewBox="${x} ${y} ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="background:${WATER}">` +
+      `<g transform="translate(${bb.tx},${bb.ty})">${paths}${sealMarkup}</g></svg>`;
   }
 
   render();
