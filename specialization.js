@@ -22,34 +22,24 @@
   specApp.hidden = false;
 
   // ---- populate the read-only snapshot header ----
-  // Nation is entered on Step 5 (grouped with Capital/Classification/
+  // Nation is entered on Step 5 now (grouped with Capital/Classification/
   // Government Type), not on the bio page - snapshot.nation is only used
-  // as a pre-fill fallback for old snapshots that still have it. It's no
-  // longer shown in the top snapshot box - that slot now shows Provinces
-  // instead, which doesn't change as the player types, so it's just set
-  // once below.
+  // as a pre-fill fallback for old snapshots that still have it. The
+  // header stays live-updated as the player types it in on Step 5.
   const identityNationEl = document.getElementById('identityNation');
   if(snapshot.nation) identityNationEl.value = snapshot.nation;
+  function updateNationHeader(){
+    document.getElementById('snapNation').textContent = identityNationEl.value.trim() || 'Unnamed Nation';
+  }
+  updateNationHeader();
+  identityNationEl.addEventListener('input', updateNationHeader);
   document.getElementById('snapEconomy').textContent = snapshot.economyType || '\u2014';
   document.getElementById('snapPopulation').textContent = snapshot.population || '\u2014';
   document.getElementById('snapGDP').textContent = snapshot.gdp || '\u2014';
   document.getElementById('snapEnergy').textContent = snapshot.energyProduction || '\u2014';
   document.getElementById('snapFood').textContent = snapshot.foodProduction || '\u2014';
   document.getElementById('step1EconomyType').textContent = snapshot.economyType || '\u2014';
-
-  // Parses a population figure like "5,000,000" or "5000000" into a
-  // plain number; returns null if unrecognized (same fallback stance as
-  // the GDP/Food parsers elsewhere in this file).
-  function parsePopulationNumber(raw){
-    if(!raw) return null;
-    const match = String(raw).trim().match(/^(-?[\d,]+)/);
-    if(!match) return null;
-    const n = parseInt(match[1].replace(/,/g, ''), 10);
-    return isNaN(n) ? null : n;
-  }
-  function formatPopulationValue(n){
-    return Math.round(n).toLocaleString('en-US');
-  }
+  document.getElementById('adjFoodValue').textContent = snapshot.foodProduction || '\u2014';
 
   // ---- Step 1: one slot per World Exports rank, tied to that rank's sector ----
   // snapshot.worldExports is the bio's actual 1st-5th ranked export labels
@@ -66,56 +56,6 @@
   const specSlotsEl = document.getElementById('specSlots');
   const chosenSpecs = new Array(5).fill(null); // one choice per rank, in order
 
-  // ---- Small claims: fewer World Export slots ----
-  //
-  // A claim under 10 provinces represents a smaller nation whose workforce
-  // can't realistically support 5 distinct major export industries, so it
-  // only gets 3 World Export slots instead of 5. Two of those are sourced
-  // from the bio's 1st and 2nd ranked exports specifically (not 1st/3rd,
-  // etc.) - a combined economy type (e.g. "Industrial Goods & Services")
-  // generates its two component sectors as the 1st and 2nd ranked exports,
-  // so sourcing from ranks 1 and 2 guarantees both halves of a combined
-  // economy type actually show up as real specializations, rather than
-  // risking the 2nd sector getting crowded out by whatever lands in a
-  // later, less predictable rank. The 3rd slot is sourced from the 5th
-  // ranked export. Players see all three labeled sequentially as "1st
-  // Export", "2nd Export", "3rd Export".
-  //
-  // Each visible slot has a SOURCE rank (which world-export label/pool it
-  // draws its options from) and a STORAGE index (where the pick lands in
-  // chosenSpecs). For a small claim these differ for the 2nd slot: it
-  // sources its options from world-export rank 2 (index 1), but the pick
-  // is stored at chosenSpecs[2] - the SPEC3 position - not chosenSpecs[1].
-  // This is deliberate and affects real game mechanics, not just display:
-  // every rank-keyed table in specialization-data.js (FUEL_MULTIPLIER_BY_
-  // RANK, ENERGY_FLAT_BONUS_BY_RANK) reads chosenSpecs by its ARRAY INDEX,
-  // so a spec landing at chosenSpecs[2] genuinely gets 3rd-rank bonus
-  // strength (2x / +75), not 2nd-rank strength - matching the fact that
-  // it's recorded as the SPEC3 pick. This one storage decision is what
-  // drives the Citizen Card / admin info / Full Application recording too
-  // (SPEC2 and SPEC4 simply stay null/blank, no separate remapping step
-  // needed) as well as Step 3's bonus math - both fall out of the same
-  // array position automatically.
-  const SMALL_CLAIM_PROVINCE_THRESHOLD = 10;
-  const provinceCount = (snapshot.perProvinceEnergy || []).length;
-  document.getElementById('snapProvinces').textContent = provinceCount > 0 ? String(provinceCount) : '\u2014';
-  // Only restrict when province count is actually known (>0) - an older
-  // snapshot with no per-province data at all can't be judged as "small",
-  // so it falls back to the normal 5 slots rather than being guessed at.
-  const isSmallClaim = provinceCount > 0 && provinceCount < SMALL_CLAIM_PROVINCE_THRESHOLD;
-  // { sourceRank: which worldExports[] label/pool supplies the options,
-  //   storageIndex: which chosenSpecs[] slot the pick is written to }
-  const VISIBLE_SLOTS = isSmallClaim
-    ? [{ sourceRank: 0, storageIndex: 0 }, { sourceRank: 1, storageIndex: 2 }, { sourceRank: 4, storageIndex: 4 }]
-    : [0, 1, 2, 3, 4].map(function(i){ return { sourceRank: i, storageIndex: i }; });
-  // displayRankByStorageRank: maps a storage position's 1-indexed "rank"
-  // (as the bonus tables see it, i.e. storageIndex+1) back to its
-  // sequential display position, so the Step 3 breakdown's ordinal labels
-  // stay consistent with what Step 1 showed the player (still "2nd", not
-  // "3rd", even though the bonus strength genuinely is 3rd-rank).
-  const displayRankByStorageRank = {};
-  VISIBLE_SLOTS.forEach(function(slot, displayIndex){ displayRankByStorageRank[slot.storageIndex + 1] = displayIndex + 1; });
-
   if(!hasWorldExports){
     const warning = document.createElement('div');
     warning.className = 'spec-warning';
@@ -124,15 +64,6 @@
       'every specialization rather than the ranking your bio actually generated - go back and re-generate your ' +
       'bio, then continue here again, if you want the real ranking.';
     specSlotsEl.parentNode.insertBefore(warning, specSlotsEl);
-  }
-
-  if(isSmallClaim){
-    const smallClaimNote = document.createElement('div');
-    smallClaimNote.className = 'spec-warning';
-    smallClaimNote.textContent = 'Your claim has ' + provinceCount + ' province' + (provinceCount === 1 ? '' : 's') +
-      ' (fewer than ' + SMALL_CLAIM_PROVINCE_THRESHOLD + '), so to reflect your smaller workforce you only get 3 ' +
-      'World Export slots instead of 5, drawn from your bio\u2019s 1st, 2nd, and 5th ranked exports.';
-    specSlotsEl.parentNode.insertBefore(smallClaimNote, specSlotsEl);
   }
 
   function specId(rank, name){ return 'spec_' + rank + '_' + name.replace(/[^a-z0-9]+/gi, '_'); }
@@ -162,17 +93,17 @@
     return status; // e.g. "requires Oil in your claim"
   }
 
-  function buildSlot(sourceRank, storageIndex, displayIndex){
-    const label = worldExports[sourceRank];
+  function buildSlot(rank){
+    const label = worldExports[rank];
     const poolNames = poolsForExportLabel(label);
 
     const slotDiv = document.createElement('div');
     slotDiv.className = 'spec-slot';
-    slotDiv.setAttribute('data-rank', storageIndex);
+    slotDiv.setAttribute('data-rank', rank);
 
     const heading = document.createElement('div');
     heading.className = 'spec-slot-heading';
-    heading.appendChild(document.createTextNode(RANK_LABELS[displayIndex] + ' Export: '));
+    heading.appendChild(document.createTextNode(RANK_LABELS[rank] + ' Export: '));
     const sectorSpan = document.createElement('span');
     sectorSpan.className = 'rank-sector';
     sectorSpan.textContent = label;
@@ -193,13 +124,13 @@
       optionsDiv.appendChild(groupLabel);
 
       (SPECIALIZATION_POOLS[poolName] || []).forEach(function(name){
-        const id = specId(storageIndex, name);
+        const id = specId(rank, name);
         const optLabel = document.createElement('label');
         optLabel.className = 'spec-option';
         optLabel.setAttribute('for', id);
         const input = document.createElement('input');
         input.type = 'radio';
-        input.name = 'specRank' + storageIndex;
+        input.name = 'specRank' + rank;
         input.id = id;
         input.value = name;
 
@@ -224,7 +155,7 @@
     return slotDiv;
   }
 
-  VISIBLE_SLOTS.forEach(function(slot, displayIndex){ specSlotsEl.appendChild(buildSlot(slot.sourceRank, slot.storageIndex, displayIndex)); });
+  for(let rank = 0; rank < 5; rank++){ specSlotsEl.appendChild(buildSlot(rank)); }
 
   // ---- Market Saturation (live from the community's Google Sheet) ----
   // Shows a colored badge next to each specialization reflecting how many
@@ -311,8 +242,8 @@
       status.classList.remove('filled');
     });
 
-    VISIBLE_SLOTS.forEach(function(slot){
-      const poolNames = poolsForExportLabel(worldExports[slot.sourceRank]);
+    for(let rank = 0; rank < 5; rank++){
+      const poolNames = poolsForExportLabel(worldExports[rank]);
       let candidates = [];
       poolNames.forEach(function(poolName){
         (SPECIALIZATION_POOLS[poolName] || []).forEach(function(name){ candidates.push(name); });
@@ -326,14 +257,14 @@
         });
         if(lessCrowded.length > 0) candidates = lessCrowded;
       }
-      if(candidates.length === 0) return;
+      if(candidates.length === 0) continue;
       const pick = candidates[Math.floor(Math.random() * candidates.length)];
-      const radio = document.getElementById(specId(slot.storageIndex, pick));
+      const radio = document.getElementById(specId(rank, pick));
       if(radio){
         radio.checked = true;
         radio.dispatchEvent(new Event('change', { bubbles: true }));
       }
-    });
+    }
     updateNextButtonState();
   });
 
@@ -367,7 +298,6 @@
     status.classList.add('filled');
     refreshDuplicateState();
     updateNextButtonState();
-    updateSnapshotBox(computeCurrentAdjustments());
   });
 
   // ---- Step 2: Military Doctrine (Priority + Stance) ----
@@ -589,210 +519,20 @@
     result.appliedFuelBonuses.forEach(function(b){
       const line = document.createElement('span');
       line.className = 'breakdown-item';
-      line.textContent = b.spec + ' (' + ordinal(displayRankByStorageRank[b.rank] || b.rank) + ') \u2014 ' + b.multiplier + '\u00d7 on ' +
+      line.textContent = b.spec + ' (' + ordinal(b.rank) + ') \u2014 ' + b.multiplier + '\u00d7 on ' +
         b.resource + ' provinces: ' + (b.provinces.length ? b.provinces.join(', ') : 'none in this claim');
       breakdownEl.appendChild(line);
     });
     result.appliedEnergyBonuses.forEach(function(b){
       const line = document.createElement('span');
       line.className = 'breakdown-item';
-      line.textContent = b.spec + ' (' + ordinal(displayRankByStorageRank[b.rank] || b.rank) + ') \u2014 +' + b.bonus + ' flat';
+      line.textContent = b.spec + ' (' + ordinal(b.rank) + ') \u2014 +' + b.bonus + ' flat';
       breakdownEl.appendChild(line);
     });
     if(result.appliedFuelBonuses.length === 0 && result.appliedEnergyBonuses.length === 0){
       breakdownEl.textContent = 'No Fuel or Energy specialization chosen - total is unchanged.';
     }
   }
-
-  function formatFoodValue(n){
-    const rounded = Math.round(n);
-    const sign = rounded >= 0 ? '+' : '';
-    const label = rounded < 0 ? 'Food Deficit' : rounded > 0 ? 'Food Surplus' : 'Food Balanced';
-    return sign + rounded + ' ' + label;
-  }
-
-  // Unlike Energy, there's no per-province food array in the snapshot
-  // contract - just the bio's single aggregate foodProduction figure, as
-  // a string like "+30 Food Surplus". This pulls the leading signed
-  // number back out so it can be used as a real starting total; returns
-  // null if the string doesn't start with a parseable number (missing or
-  // unrecognized snapshot data), same "can't adjust, show unchanged"
-  // fallback stance the Energy side takes for missing per-province data.
-  function parseFoodProductionNumber(raw){
-    if(!raw) return null;
-    const match = String(raw).match(/^([+-]?\d+)/);
-    if(!match) return null;
-    return parseInt(match[1], 10);
-  }
-
-  function renderFoodAdjustment(){
-    const originalEl = document.getElementById('adjFoodOriginal');
-    const valueEl = document.getElementById('adjFoodValue');
-    const breakdownEl = document.getElementById('adjFoodBreakdown');
-
-    const originalNumber = parseFoodProductionNumber(snapshot.foodProduction);
-    if(originalNumber === null){
-      const fallback = snapshot.foodProduction || '\u2014';
-      originalEl.textContent = fallback;
-      valueEl.textContent = fallback;
-      breakdownEl.textContent = 'This claim\u2019s Food Production figure isn\u2019t in a recognized format, so ' +
-        'specialization adjustments can\u2019t be calculated - showing the original total unchanged.';
-      return;
-    }
-
-    const result = applyFoodSpecializationAdjustments(originalNumber, chosenSpecs);
-    originalEl.textContent = formatFoodValue(result.originalTotal);
-    valueEl.textContent = formatFoodValue(result.adjustedTotal);
-
-    breakdownEl.innerHTML = '';
-    result.appliedFoodBonuses.forEach(function(b){
-      const line = document.createElement('span');
-      line.className = 'breakdown-item';
-      const displayRank = ordinal(displayRankByStorageRank[b.rank] || b.rank);
-      const effectNote = b.multiplier === 0 ? 'no effect' : b.multiplier === 1 ? 'full effect' : (b.multiplier + '\u00d7 effect');
-      line.textContent = b.spec + ' (' + displayRank + ') \u2014 +' + b.bonus + ' flat (' + effectNote + ')';
-      breakdownEl.appendChild(line);
-    });
-    if(result.appliedFoodBonuses.length === 0){
-      breakdownEl.textContent = 'No Agriculture or Fishing specialization chosen - total is unchanged.';
-    }
-  }
-
-  // ---- Step 4: population -> GDP adjustment ----
-  const specPopAdjustEl = document.getElementById('specPopAdjust');
-
-  // Single source of truth for every population-affected total - GDP,
-  // Population itself, Food Production, and Energy Production - so Step
-  // 4's own display and the persistent snapshot box at the top of the
-  // page can never show different numbers for the same picks. Pure
-  // computation, no DOM writes.
-  function computeCurrentAdjustments(){
-    const populationPercent = parseInt(specPopAdjustEl.value, 10);
-
-    const gdp = applyPopulationAdjustment(snapshot.gdp, populationPercent);
-
-    const populationBase = parsePopulationNumber(snapshot.population);
-    const population = populationBase === null ? null : {
-      originalNumber: populationBase,
-      adjustedNumber: Math.round(populationBase * (1 + populationPercent / 100)),
-    };
-
-    const foodBase = parseFoodProductionNumber(snapshot.foodProduction);
-    let food = null;
-    if(foodBase !== null){
-      const specResult = applyFoodSpecializationAdjustments(foodBase, chosenSpecs);
-      const popResult = applyPopulationFoodAdjustment(specResult.adjustedTotal, populationPercent);
-      food = { step3Total: specResult.adjustedTotal, adjustedTotal: popResult.adjustedTotal };
-    }
-
-    const perProvinceEnergy = snapshot.perProvinceEnergy || [];
-    let energy = null;
-    if(perProvinceEnergy.length > 0){
-      const specResult = applyEnergySpecializationAdjustments(perProvinceEnergy, chosenSpecs);
-      const popResult = applyPopulationEnergyAdjustment(specResult.adjustedTotal, populationPercent);
-      energy = { step3Total: specResult.adjustedTotal, adjustedTotal: popResult.adjustedTotal };
-    }
-
-    return { populationPercent, gdp, population, food, energy };
-  }
-
-  // The persistent snapshot box at the top of the page (visible on every
-  // step, not just Step 4) - always shows the CURRENT totals given
-  // whatever's been picked so far, not the bio's frozen original figures.
-  // Provinces and Economy Type don't change from any player choice, so
-  // they're set once elsewhere and left alone here.
-  function updateSnapshotBox(totals){
-    document.getElementById('snapPopulation').textContent = totals.population
-      ? formatPopulationValue(totals.population.adjustedNumber) : (snapshot.population || '\u2014');
-    document.getElementById('snapGDP').textContent = totals.gdp.parsed
-      ? totals.gdp.adjustedGDPText : (snapshot.gdp || '\u2014');
-    document.getElementById('snapEnergy').textContent = totals.energy
-      ? formatEnergyValue(totals.energy.adjustedTotal) : (snapshot.energyProduction || '\u2014');
-    document.getElementById('snapFood').textContent = totals.food
-      ? formatFoodValue(totals.food.adjustedTotal) : (snapshot.foodProduction || '\u2014');
-  }
-
-  function renderPopulationAdjustment(){
-    const totals = computeCurrentAdjustments();
-    const populationPercent = totals.populationPercent;
-
-    // Population itself
-    const popOriginalEl = document.getElementById('adjPopulationOriginal');
-    const popValueEl = document.getElementById('adjPopulationValue');
-    const popBreakdownEl = document.getElementById('adjPopulationBreakdown');
-    if(!totals.population){
-      const fallback = snapshot.population || '\u2014';
-      popOriginalEl.textContent = fallback;
-      popValueEl.textContent = fallback;
-      popBreakdownEl.textContent = 'This claim\u2019s Population figure isn\u2019t in a recognized format, so it ' +
-        'can\u2019t be adjusted - showing the original unchanged.';
-    } else {
-      popOriginalEl.textContent = formatPopulationValue(totals.population.originalNumber);
-      popValueEl.textContent = formatPopulationValue(totals.population.adjustedNumber);
-      popBreakdownEl.textContent = populationPercent === 0
-        ? 'Stable population - no change.'
-        : (populationPercent > 0 ? '+' : '') + populationPercent + '% \u2192 ' + formatPopulationValue(totals.population.adjustedNumber);
-    }
-
-    // GDP
-    const gdpOriginalEl = document.getElementById('adjGDPOriginal');
-    const gdpValueEl = document.getElementById('adjGDPValue');
-    const gdpBreakdownEl = document.getElementById('adjGDPBreakdown');
-    gdpOriginalEl.textContent = totals.gdp.originalGDPText;
-    gdpValueEl.textContent = totals.gdp.adjustedGDPText;
-    if(!totals.gdp.parsed){
-      gdpBreakdownEl.textContent = 'This claim\u2019s GDP figure isn\u2019t in a recognized format, so the population ' +
-        'adjustment can\u2019t be calculated - showing the original total unchanged.';
-    } else if(populationPercent === 0){
-      gdpBreakdownEl.textContent = 'Stable population - no GDP change.';
-    } else {
-      const sign = totals.gdp.gdpChangePercent >= 0 ? '+' : '';
-      gdpBreakdownEl.textContent = (populationPercent > 0 ? '+' : '') + populationPercent + '% population \u2192 ' +
-        sign + (Math.round(totals.gdp.gdpChangePercent * 100) / 100) + '% GDP';
-    }
-
-    // Food Production - builds on top of Step 3's already-specialization-
-    // adjusted total, not the bio's raw pre-specialization figure.
-    const popFoodOriginalEl = document.getElementById('adjPopFoodOriginal');
-    const popFoodValueEl = document.getElementById('adjPopFoodValue');
-    const popFoodBreakdownEl = document.getElementById('adjPopFoodBreakdown');
-    if(!totals.food){
-      const fallback = snapshot.foodProduction || '\u2014';
-      popFoodOriginalEl.textContent = fallback;
-      popFoodValueEl.textContent = fallback;
-      popFoodBreakdownEl.textContent = 'This claim\u2019s Food Production figure isn\u2019t in a recognized format, ' +
-        'so the population adjustment can\u2019t be calculated - showing the original total unchanged.';
-    } else {
-      popFoodOriginalEl.textContent = formatFoodValue(totals.food.step3Total);
-      popFoodValueEl.textContent = formatFoodValue(totals.food.adjustedTotal);
-      popFoodBreakdownEl.textContent = populationPercent === 0
-        ? 'Stable population - no additional Food Production change.'
-        : (populationPercent > 0 ? '+' : '') + populationPercent + '% population \u2192 ' + formatFoodValue(totals.food.adjustedTotal) + ' net.';
-    }
-
-    // Energy Production - same pattern as Food, built on Step 3's total.
-    const popEnergyOriginalEl = document.getElementById('adjPopEnergyOriginal');
-    const popEnergyValueEl = document.getElementById('adjPopEnergyValue');
-    const popEnergyBreakdownEl = document.getElementById('adjPopEnergyBreakdown');
-    if(!totals.energy){
-      const fallback = snapshot.energyProduction || '\u2014';
-      popEnergyOriginalEl.textContent = fallback;
-      popEnergyValueEl.textContent = fallback;
-      popEnergyBreakdownEl.textContent = 'Per-province data isn\u2019t available for this claim, so the population ' +
-        'adjustment can\u2019t be calculated - showing the original total unchanged.';
-    } else {
-      popEnergyOriginalEl.textContent = formatEnergyValue(totals.energy.step3Total);
-      popEnergyValueEl.textContent = formatEnergyValue(totals.energy.adjustedTotal);
-      popEnergyBreakdownEl.textContent = populationPercent === 0
-        ? 'Stable population - no additional Energy Production change.'
-        : (populationPercent > 0 ? '+' : '') + populationPercent + '% population \u2192 ' + formatEnergyValue(totals.energy.adjustedTotal) + ' net.';
-    }
-
-    updateSnapshotBox(totals);
-  }
-
-  specPopAdjustEl.addEventListener('change', renderPopulationAdjustment);
-  updateSnapshotBox(computeCurrentAdjustments());
 
   // ---- Step 5: National Identity + Citizen Card BBC ----
   //
@@ -802,10 +542,10 @@
   // link, IIWiki link) are left as the original template's own literal
   // placeholder text for the player to fill in by hand after copying.
   const CITIZEN_CARD_TEMPLATE =
-`[pre][box][background-block=#FFE6E6][center][size=250][b] [nation=noflag]{{NATION}}[/nation][/b][/size]
+`[pre][*][box][background-block=#FFE6E6][center][size=250][b] [nation=noflag]{{NATION}}[/nation][/b][/size]
 [img]200x100 Pixel Image of Flag here[/img]
 [u]Join Date:{{JOIN_DATE}}[/u]
-[Spoiler= More Information][table=plain][tr]
+[Spoiler= More Information[DELETE ME]][table=plain][tr]
 [td][size=110]Classification:
 [b]{{CLASSIFICATION}}[/b][/size][/td]
 [td][size=110]Capital:
@@ -832,7 +572,7 @@
 [*]Air Force: {{AIR_FORCE}}
 [*]Expeditionary: {{EXPEDITIONARY}}
 [*]Paramilitary: {{PARAMILITARY}}[/list][/td]
-[/tr][/table][/spoiler[delete this]]
+[/tr][/table][/spoiler[DELETE ME]]
 
 [url=DISPATCH HERE]Full Citizen Application[/url]
 [url=IIWIKI LINK (Optional but encouraged)]IIWiki Page[/url]
@@ -846,12 +586,7 @@
     return mm + '-' + dd + '-' + yy;
   }
 
-  // Common values both the Citizen Card and the Full Application pull
-  // from - factored out so the two templates can't drift out of sync
-  // with each other on things like how Pacifist is worded.
-  function gatherCommonFields(){
-    // chosenSpecs is already indexed by its recorded SPEC position (see
-    // VISIBLE_SLOTS above) - no remapping needed here anymore.
+  function buildCitizenCard(){
     const specs = [0,1,2,3,4].map(function(i){ return chosenSpecs[i] || ''; });
     const priorityText = chosenStance === 'Pacifist' ? 'Pacifist (no military)' : (chosenPriority || '');
     const stanceText = chosenStance || '';
@@ -861,12 +596,6 @@
     const expeditionary = String(focusValues['Expeditionary Forces'] || 0);
     const paramilitary = String(focusValues['Paramilitary / Militia / Gendarmes / Reserves'] || 0);
     const nationName = document.getElementById('identityNation').value.trim();
-    return { specs, priorityText, stanceText, army, navy, airForce, expeditionary, paramilitary, nationName };
-  }
-
-  function buildCitizenCard(){
-    const f = gatherCommonFields();
-    const nationName = f.nationName;
 
     const card = CITIZEN_CARD_TEMPLATE
       .replace('{{NATION}}', nationName || 'Nation')
@@ -877,15 +606,15 @@
       .replace('{{GOVERNMENT_TYPE}}', document.getElementById('identityGovernment').value.trim())
       .replace('{{ECONOMY_TYPE}}', snapshot.economyType || '')
       .replace('{{GDP}}', snapshot.gdp || '')
-      .replace('{{SPEC1}}', f.specs[0]).replace('{{SPEC2}}', f.specs[1]).replace('{{SPEC3}}', f.specs[2])
-      .replace('{{SPEC4}}', f.specs[3]).replace('{{SPEC5}}', f.specs[4])
-      .replace('{{PRIORITY}}', f.priorityText)
-      .replace('{{STANCE}}', f.stanceText)
-      .replace('{{ARMY}}', f.army)
-      .replace('{{NAVY}}', f.navy)
-      .replace('{{AIR_FORCE}}', f.airForce)
-      .replace('{{EXPEDITIONARY}}', f.expeditionary)
-      .replace('{{PARAMILITARY}}', f.paramilitary);
+      .replace('{{SPEC1}}', specs[0]).replace('{{SPEC2}}', specs[1]).replace('{{SPEC3}}', specs[2])
+      .replace('{{SPEC4}}', specs[3]).replace('{{SPEC5}}', specs[4])
+      .replace('{{PRIORITY}}', priorityText)
+      .replace('{{STANCE}}', stanceText)
+      .replace('{{ARMY}}', army)
+      .replace('{{NAVY}}', navy)
+      .replace('{{AIR_FORCE}}', airForce)
+      .replace('{{EXPEDITIONARY}}', expeditionary)
+      .replace('{{PARAMILITARY}}', paramilitary);
 
     // A copy-paste-ready block matching the FR (Form Responses) sheet's
     // own column order (B through T - column A/Timestamp is filled by
@@ -894,116 +623,27 @@
     // would just be one more thing to strip out before pasting.
     const adminInfo = [
       nationName,
-      document.getElementById('identityClassification').value.trim(),
-      document.getElementById('identityCapital').value.trim(),
-      document.getElementById('identityGovernment').value.trim(),
       snapshot.economyType || '',
       snapshot.gdp || '',
       snapshot.foodProduction || '',
       snapshot.energyProduction || '',
       snapshot.population || '',
-      f.specs[0],
-      f.specs[1],
-      f.specs[2],
-      f.specs[3],
-      f.specs[4],
-      f.priorityText,
-      f.stanceText,
-      f.navy,
-      f.army,
-      f.airForce,
-      f.expeditionary,
-      f.paramilitary,
+      specs[0],
+      specs[1],
+      specs[2],
+      specs[3],
+      specs[4],
+      priorityText,
+      stanceText,
+      navy,
+      army,
+      airForce,
+      expeditionary,
+      paramilitary,
       snapshot.claimCode || '',
     ].join('\n');
 
-    return card + '\n\n[/spoiler]\n\n[spoiler=for admin team usage]\n' + adminInfo + '\n[/spoiler]';
-  }
-
-  // ---- Full Application BBC generator ----
-  //
-  // A separate, longer template from the Citizen Card - this is the post
-  // players make in their own Dispatches (the Citizen Card above is what
-  // gets sent to Rylet directly, see the Next Steps note in Step 5's
-  // HTML). Every {{PLACEHOLDER}} below corresponds 1:1 to a
-  // "{Generator Fill}" spot in the community-provided template. Sections
-  // meant for the player to write themselves (Political Environment,
-  // Major Imports picks, economy narrative, military narrative, History)
-  // are left as the original template's own instructional text in
-  // parentheses - this page has no data to fill those from, same
-  // philosophy as the Citizen Card leaving the flag image for the player.
-  const FULL_APPLICATION_TEMPLATE =
-`[list][*][b]Display Name[/b]: {{DISPLAY_NAME}}
-[*][b]Capital City[/b]: {{CAPITAL}}
-[*][b]Territory[/b]: [spoiler][img]INSERTIMAGEHERE[/img][/spoiler]
-[*][b]Population[/b]: {{POPULATION}}
-[*][b]Description of Political Environment[/b]: 
-
-
-(Give a fairly detailed description of your nation's Government, including Type of Government, Head of Government/State, legislature, etc.)
-
-[*][b]Description of the Economy[/b]: 
-
-[list]
-[*][b]Economy Type[/b]: {{ECONOMY_TYPE}}
-
-[*][b]Specialization[/b]
-{{SPEC1}} | {{SPEC2}} | {{SPEC3}} | {{SPEC4}}| {{SPEC5}}|
-[*][b]Description of Resources:[/b]
-    Food Production: {{FOOD_PRODUCTION}}
-    Energy Production: {{ENERGY_PRODUCTION}}
-
-[*][b]Major Imports[/b]
-(Use the potential imports section as an idea of what kind of imports your nation might need. Some things make sense to produce nationally while others might be outside of the scope of your nation. Choose a few 3-5 to list so you can find economic partners)
-[/list]
-
-(Describe your economic system including the type of economy, the GDP in the Land Bio as well as the world exports chosen from the form. Outside of Land Bio information, be sure to tell us about how your economy operates going slightly beyond just saying "free trade")
-
-[*][b]Description of Your Nation's Military:[/b]
-
-[b]Military Doctrine[/b]: {{MIL_DOCTRINE}}
-
-[b]National Attitude[/b]: {{NATIONAL_ATTITUDE}}
-
-[b]Military Focus[/b]:
-[List]
-{{ARMY}} :[b]Army[/b]
-{{NAVY}} :[b]Navy[/b]
-{{AIR_FORCE}} :[b]Air force[/b]
-{{EXPEDITIONARY}} :[b]Expeditionary[/b]
-{{PARAMILITARY}} :[b] Paramilitary/Militia/Gendarmes[/b]
-[/list]
-(Military size, type, and quality of equipment, strengths/weaknesses, etc.[Size should be at most 5% of your country's population most nations should be well below that])
-
-[*][b]History of your Nation[/b]: (Make it sufficiently detailed to take into account all territorial claims)`;
-
-  function buildFullApplication(){
-    const f = gatherCommonFields();
-    const application = FULL_APPLICATION_TEMPLATE
-      .replace('{{DISPLAY_NAME}}', f.nationName || 'Nation')
-      .replace('{{CAPITAL}}', document.getElementById('identityCapital').value.trim())
-      .replace('{{POPULATION}}', snapshot.population || '')
-      .replace('{{ECONOMY_TYPE}}', snapshot.economyType || '')
-      .replace('{{SPEC1}}', f.specs[0]).replace('{{SPEC2}}', f.specs[1]).replace('{{SPEC3}}', f.specs[2])
-      .replace('{{SPEC4}}', f.specs[3]).replace('{{SPEC5}}', f.specs[4])
-      .replace('{{FOOD_PRODUCTION}}', snapshot.foodProduction || '')
-      .replace('{{ENERGY_PRODUCTION}}', snapshot.energyProduction || '')
-      .replace('{{MIL_DOCTRINE}}', f.priorityText)
-      .replace('{{NATIONAL_ATTITUDE}}', f.stanceText)
-      .replace('{{ARMY}}', f.army)
-      .replace('{{NAVY}}', f.navy)
-      .replace('{{AIR_FORCE}}', f.airForce)
-      .replace('{{EXPEDITIONARY}}', f.expeditionary)
-      .replace('{{PARAMILITARY}}', f.paramilitary);
-
-    // The Citizen Card used to be its own separate copy button - it's now
-    // folded into the bottom of the Full Application (wrapped in its own
-    // spoiler) since players send the whole Application to Rylet as one
-    // piece. buildCitizenCard() is unchanged and still includes its own
-    // nested admin-info spoiler - that data is exactly what Rylet needs
-    // to process the application, so it travels along with it.
-    const citizenCard = buildCitizenCard();
-    return application + '\n\n[spoiler=Citizen Card]\n' + citizenCard + '\n[/spoiler]';
+    return card + '\n\n[spoiler=for admin team usage]\n' + adminInfo + '\n[/spoiler]';
   }
 
   // Same copy-to-clipboard pattern used on the bio page (map.js's
@@ -1030,11 +670,11 @@
       }
     });
   }
-  bindCopyButton('copyFullApplicationBtn', function(){
-    const text = buildFullApplication();
-    document.getElementById('fullApplicationSource').value = text;
+  bindCopyButton('copyCitizenCardBtn', function(){
+    const text = buildCitizenCard();
+    document.getElementById('citizenCardSource').value = text;
     return text;
-  }, 'Full Application');
+  }, 'Copy Citizen Card BBC Code');
 
   // ---- Step navigation ----
   const TOTAL_STEPS = 5;
@@ -1044,12 +684,12 @@
   const stepIndicator = document.getElementById('stepIndicator');
 
   function panelFor(step){
-    return document.getElementById('step' + step);
+    return step === 'summary' ? document.getElementById('stepSummary') : document.getElementById('step' + step);
   }
 
   function updateNextButtonState(){
     let enabled = true;
-    if(currentStep === 1) enabled = VISIBLE_SLOTS.every(function(slot){ return !!chosenSpecs[slot.storageIndex]; });
+    if(currentStep === 1) enabled = chosenSpecs.every(Boolean);
     if(currentStep === 2){
       // Doctrine (both Priority and Stance) always required. Focus points
       // must be fully allocated too, UNLESS Pacifist (budget is 0, so
@@ -1059,7 +699,8 @@
       const focusComplete = chosenStance === 'Pacifist' || pointsSpent() === budget;
       enabled = doctrineChosen && focusComplete;
     }
-    // Step 5 (National Identity) is never gated - these are flavor fields.
+    // Step 5 (National Identity) is never gated - these are flavor fields,
+    // not required to see the summary.
     nextBtn.disabled = !enabled;
     const standardSetupNextBtn = document.getElementById('standardSetupNextBtn');
     if(standardSetupNextBtn) standardSetupNextBtn.disabled = !enabled;
@@ -1069,194 +710,49 @@
 
   function showStep(step){
     // hide all panels
-    [1,2,3,4,5].forEach(function(s){ panelFor(s).hidden = true; });
+    [1,2,3,4,5,'summary'].forEach(function(s){ panelFor(s).hidden = true; });
     panelFor(step).hidden = false;
 
     backBtn.hidden = (step === 1);
     nextBtn.textContent = (step === TOTAL_STEPS) ? 'Finish \u2192' : 'Next \u2192';
-    // Step 5 is the real final step now (no separate summary page after
-    // it) - nothing to advance to, so the Next/Finish button just hides.
-    nextBtn.hidden = (step === TOTAL_STEPS);
+    if(step === 'summary'){
+      nextBtn.hidden = true;
+    } else {
+      nextBtn.hidden = false;
+    }
 
     // update step-indicator dots
     stepIndicator.querySelectorAll('.step-dot').forEach(function(dot){
       const dotStep = parseInt(dot.getAttribute('data-step'), 10);
-      dot.classList.toggle('active', dotStep === step);
-      dot.classList.toggle('done', dotStep < step);
+      dot.classList.toggle('active', step !== 'summary' && dotStep === step);
+      dot.classList.toggle('done', step === 'summary' || dotStep < step);
     });
 
-    if(step === 3){ renderChosenSummary(); renderEnergyAdjustment(); renderFoodAdjustment(); }
-    if(step === 4) renderPopulationAdjustment();
-    if(step === 5){ renderClaimMap(); renderPotentialImports(); }
+    if(step === 3){ renderChosenSummary(); renderEnergyAdjustment(); }
+    if(step === 'summary') renderFinalSummary();
     updateNextButtonState();
   }
 
-  // ---- Step 5: claim map snapshot (handed off from the bio page) ----
-  //
-  // map.js embeds a ready-made "map of your claim" SVG (one per continent
-  // the claim touches, gold-outlined provinces on the same neutral fill
-  // used elsewhere) directly on the bio page, and captures that same
-  // markup into snapshot.claimMapHtml when "Continue to Specialization" is
-  // clicked. Older snapshots saved before this existed simply won't have
-  // it - handled the same "show a note, don't error" way as every other
-  // optional snapshot field on this page.
-  //
-  // Rendered once (guarded by claimMapRendered) rather than every time
-  // Step 5 is shown, since the map itself never changes and rebuilding it
-  // repeatedly would just detach/reattach the same SVGs for no reason.
-  let claimMapRendered = false;
-
-  // Rasterizes one of the claim-map SVGs to a PNG and triggers a browser
-  // download - SVG is what's embedded, but a plain image file is far more
-  // useful for actually attaching to a forum post than raw SVG markup
-  // would be. Draws through an off-screen <img>/<canvas> pair (the
-  // standard way to rasterize inline SVG client-side); upscaled 3x off the
-  // SVG's own viewBox dimensions so the exported image isn't blurry when
-  // embedded larger than the on-page thumbnail.
-  function downloadSvgAsPng(svgEl, filename){
-    const svgString = new XMLSerializer().serializeToString(svgEl);
-    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.onload = function(){
-      const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
-      const scale = 3;
-      const width = (vb && vb.width) ? vb.width : (svgEl.clientWidth || 800);
-      const height = (vb && vb.height) ? vb.height : (svgEl.clientHeight || 600);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(width * scale);
-      canvas.height = Math.round(height * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(svgUrl);
-      canvas.toBlob(function(blob){
-        if(!blob) return;
-        const dlUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = dlUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(function(){ URL.revokeObjectURL(dlUrl); }, 1000);
-      }, 'image/png');
-    };
-    img.onerror = function(){
-      URL.revokeObjectURL(svgUrl);
-      console.warn('[Specialization] Could not rasterize the claim map for download.');
-    };
-    img.src = svgUrl;
-  }
-
-  function renderClaimMap(){
-    const el = document.getElementById('claimMapDisplay');
-    if(!el || claimMapRendered) return;
-    claimMapRendered = true;
-
-    if(!snapshot.claimMapHtml){
-      el.innerHTML = '<p class="claim-map-empty">No claim map was captured for this claim (an older bio snapshot, ' +
-        'most likely, from before this feature existed) - go back and re-generate your bio if you want one.</p>';
-      return;
-    }
-
-    const row = document.createElement('div');
-    row.className = 'map-row';
-    row.innerHTML = snapshot.claimMapHtml;
-    el.appendChild(row);
-
-    row.querySelectorAll('.map-shot').forEach(function(shot){
-      const svg = shot.querySelector('svg');
-      if(!svg) return;
-      const labelEl = shot.querySelector('.map-shot-label');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn-secondary map-shot-download';
-      btn.textContent = 'Download Image';
-      btn.addEventListener('click', function(){
-        const nationBit = (document.getElementById('identityNation').value.trim() || 'claim').replace(/[^a-z0-9]+/gi, '_');
-        const continentBit = (labelEl ? labelEl.textContent.trim() : 'map').replace(/[^a-z0-9]+/gi, '_');
-        downloadSvgAsPng(svg, nationBit + '_' + continentBit + '_map.png');
-      });
-      shot.appendChild(btn);
-    });
-
-    initClaimMapColorPicker(row);
-  }
-
-  // ---- Step 5: claim map color picker ----
-  //
-  // map.js marks every claimed province path (and the capital seal) with
-  // a "claim-fill" class specifically so this page can find and recolor
-  // them after the SVG has already been baked into snapshot.claimMapHtml
-  // - the color picker and hex box here just set that attribute directly
-  // on the live DOM elements, and the download button (above) rasterizes
-  // whatever the SVG currently looks like, so a recolor always carries
-  // through to the downloaded PNG.
-  function normalizeHexColor(raw){
-    const s = String(raw || '').trim().replace(/^#/, '');
-    if(/^[0-9a-f]{6}$/i.test(s)) return '#' + s.toLowerCase();
-    if(/^[0-9a-f]{3}$/i.test(s)){
-      return '#' + s.toLowerCase().split('').map(function(c){ return c + c; }).join('');
-    }
-    return null;
-  }
-
-  function initClaimMapColorPicker(row){
-    const colorPicker = document.getElementById('claimMapColorPicker');
-    const hexInput = document.getElementById('claimMapColorHex');
-    if(!colorPicker || !hexInput) return;
-
-    const claimFillEls = row.querySelectorAll('.claim-fill');
-    if(claimFillEls.length === 0) return; // nothing to recolor (e.g. no capital, no claimed provinces somehow)
-
-    // Starting color is whatever map.js already baked in (the theme's
-    // gold), not a hardcoded default, so the picker reflects the map
-    // exactly as shown before anyone touches it.
-    const currentFill = normalizeHexColor(claimFillEls[0].getAttribute('fill')) || '#e0a83e';
-    colorPicker.value = currentFill;
-    hexInput.value = currentFill;
-
-    function applyColor(hex){
-      claimFillEls.forEach(function(elm){ elm.setAttribute('fill', hex); });
-    }
-
-    colorPicker.addEventListener('input', function(){
-      hexInput.value = colorPicker.value;
-      hexInput.classList.remove('invalid');
-      applyColor(colorPicker.value);
-    });
-
-    hexInput.addEventListener('input', function(){
-      const normalized = normalizeHexColor(hexInput.value);
-      if(!normalized){
-        hexInput.classList.add('invalid');
-        return;
-      }
-      hexInput.classList.remove('invalid');
-      colorPicker.value = normalized;
-      applyColor(normalized);
-    });
-  }
-
-  // ---- Step 5: potential imports for the 5 chosen specializations ----
-  //
-  // One line per filled rank, ordinal-labeled to match how the rank is
-  // referred to everywhere else on this page (1st/2nd/etc.), listing
-  // whatever IMPORTS_BY_SPECIALIZATION has for that specialization (some
-  // picks intentionally have none - see the comment on that table in
-  // specialization-data.js).
-  function renderPotentialImports(){
-    const el = document.getElementById('potentialImportsList');
-    if(!el) return;
-    const lines = [];
-    VISIBLE_SLOTS.forEach(function(slot, displayIndex){
-      const spec = chosenSpecs[slot.storageIndex];
-      if(!spec) return;
-      const imports = importsForSpecialization(spec);
-      const importsText = imports.length ? imports.join(', ') : 'No specific imports required';
-      lines.push('<div class="import-line"><strong>' + ordinal(displayIndex + 1) + ' \u2014 ' + spec + ':</strong> ' + importsText + '</div>');
-    });
-    el.innerHTML = lines.join('') || '\u2014';
+  function renderFinalSummary(){
+    document.getElementById('summarySpecs').textContent = chosenSpecs.filter(Boolean).join(', ') || '\u2014';
+    const militarySummary = chosenStance === 'Pacifist'
+      ? 'Pacifist - no military'
+      : (chosenPriority || '\u2014') + ' priority, ' + (chosenStance || '\u2014') + ' stance \u2014 ' +
+        MILITARY_BRANCHES.map(function(b){ return b.id + ': ' + (focusValues[b.id] || 0); }).join(', ');
+    document.getElementById('summaryMilitary').textContent = militarySummary;
+    const popSelect = document.getElementById('specPopAdjust');
+    const pct = parseInt(popSelect.value, 10);
+    document.getElementById('summaryPopLevel').textContent = (pct >= 0 ? '+' : '') + pct + '%' + (pct === 0 ? ' (Stable)' : '');
+    const identityBits = [
+      document.getElementById('identityClassification').value.trim(),
+      document.getElementById('identityNation').value.trim(),
+    ].filter(Boolean).join(' ');
+    const capitalBit = document.getElementById('identityCapital').value.trim();
+    const govBit = document.getElementById('identityGovernment').value.trim();
+    let identitySummary = identityBits || '\u2014';
+    if(capitalBit) identitySummary += ' \u2014 Capital: ' + capitalBit;
+    if(govBit) identitySummary += ' \u2014 ' + govBit;
+    document.getElementById('summaryIdentity').textContent = identitySummary;
   }
 
   backBtn.addEventListener('click', function(){
@@ -1266,9 +762,9 @@
     if(currentStep < TOTAL_STEPS){
       currentStep += 1;
       showStep(currentStep);
+    } else {
+      showStep('summary');
     }
-    // On step 5 the button is hidden (see showStep), so there's nothing
-    // further to advance to - no else branch needed.
   });
 
   showStep(currentStep);

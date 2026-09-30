@@ -19,6 +19,10 @@
  *       dominant: "Oceanic",
  *       breakdown: { "Oceanic": 87.4, "Semi-Arid": 12.6 }
  *     },
+ *     sectorSplit, populationBase, energyRoll, foodRoll, gdpBase,
+ *     resourceType         // fixed per-province roll values, baked into
+ *                           // data.js - see the note at the top of that
+ *                           // file for what each one feeds into below
  *     isCapital: false           // true for at most one province - set on
  *                                 // the map by clicking the star next to a
  *                                 // claimed province in the sidebar list
@@ -31,14 +35,19 @@
  *     the "Copy BBC Code" button's clipboard content
  *
  * Both are built from one shared computeEconomics() pass so the numbers
- * in the prose and the numbers in the BBC code always match — if you add
- * more output formats later, feed them from that same object rather than
- * recomputing sector splits again (each computation re-rolls the dice).
+ * in the prose and the numbers in the BBC code always match.
  *
- * Also included below: ECON_SECTOR_CONFIG and computeSectorSplit(), which
- * randomize a Services / Manufacturing / Extraction breakdown for each
- * province based on its econ category, per-generation. See the comment
- * above ECON_SECTOR_CONFIG for how to hard-code these instead later.
+ * Sector split, population, energy/food production, GDP, and energy
+ * resource type are each fixed per province now that the map is
+ * finalized (baked into data.js as sectorSplit/populationBase/energyRoll/
+ * foodRoll/gdpBase/resourceType), rather than re-rolled with Math.random()
+ * on every "Generate" click. The energy/food production *totals* and GDP
+ * *modifier* still vary with which provinces are in the CURRENT claim
+ * (claim-size brackets, and each province's own food/energy/population),
+ * so those stay computed at generation time - only the underlying
+ * per-province roll is fixed. Each spot below still falls back to a fresh
+ * Math.random() roll if a province is missing its baked-in value (e.g. a
+ * new province added before its own roll exists).
  */
 
 function generateLandBio(provinces) {
@@ -100,8 +109,14 @@ function computeEconomics(provinces) {
   // blended total) - buildBioText uses this for the per-province testing
   // breakdown so the underlying per-province math can actually be checked,
   // not just trusted from the aggregate.
+  //
+  // Each province's sector split (and the population/energy/food/GDP rolls
+  // further down) is now baked into data.js as a fixed value, since the
+  // province map is finalized - see the per-province fields note at the
+  // top of data.js. computeSectorSplit(p.econ) is kept as a fallback only,
+  // for a province added later that hasn't had its own roll baked in yet.
   const perProvinceSectors = provinces
-    .map(p => ({ label: p.label, econ: p.econ, split: computeSectorSplit(p.econ) }))
+    .map(p => ({ label: p.label, econ: p.econ, split: p.sectorSplit || computeSectorSplit(p.econ) }))
     .filter(entry => entry.split);
   const sectorSplits = perProvinceSectors.map(entry => entry.split);
   const sectorTotals = sectorSplits.length > 0 ? computeSectorTotals(sectorSplits) : null;
@@ -462,7 +477,7 @@ const ECON_SECTOR_CONFIG = {
 const LIGHT_INDUSTRY_FACTOR = {
   "Service Focused":      0.75,
   "Service Oriented":     0.50,
-  "Production Focused":   0.40,
+  "Production Focused":   0.25,
   "Energy Focused":       0.10,
   "Energy Oriented":      0.20,
   "Agriculture Focused":  0.75,
@@ -509,7 +524,10 @@ const CLIMATE_POPULATION_MODIFIER = {
 };
 
 function computeProvincePopulation(p) {
-  const base = randInt(400000, 3000000);
+  // Fixed per province (populationBase, baked into data.js) now that the
+  // map is finalized; falls back to a fresh roll for a province that
+  // hasn't had one baked in yet.
+  const base = p.populationBase != null ? p.populationBase : randInt(400000, 3000000);
   const econMod = ECON_POPULATION_MODIFIER[p.econ] != null ? ECON_POPULATION_MODIFIER[p.econ] : 1;
   const climateName = p.climate ? p.climate.dominant : null;
   const climateMod = (climateName && CLIMATE_POPULATION_MODIFIER[climateName] != null) ? CLIMATE_POPULATION_MODIFIER[climateName] : 1;
@@ -560,7 +578,10 @@ function computeEnergyProduction(provinces) {
   const perProvince = provinces.map(p => {
     const config = ENERGY_OUTPUT_CONFIG[p.econ];
     if (!config) return { label: p.label, econ: p.econ, roll: 0, value: 0 };
-    const roll = randInt(config.range[0], config.range[1]);
+    // Fixed per province (energyRoll, baked into data.js); the P2/O2
+    // multiplier still depends on the CURRENT claim's size, so that part
+    // stays dynamic. Falls back to a fresh roll if energyRoll is missing.
+    const roll = p.energyRoll != null ? p.energyRoll : randInt(config.range[0], config.range[1]);
     const multiplier = config.uses === "O2" ? O2 : P2;
     const value = roll * multiplier;
     total += value;
@@ -625,7 +646,10 @@ function computeFoodProduction(provinces) {
   const perProvince = provinces.map(p => {
     const config = FOOD_OUTPUT_CONFIG[p.econ];
     if (!config) return { label: p.label, econ: p.econ, roll: 0, value: 0 };
-    const roll = randInt(config.range[0], config.range[1]);
+    // Fixed per province (foodRoll, baked into data.js); the T2/U2
+    // multiplier still depends on the CURRENT claim's size, so that part
+    // stays dynamic. Falls back to a fresh roll if foodRoll is missing.
+    const roll = p.foodRoll != null ? p.foodRoll : randInt(config.range[0], config.range[1]);
     const multiplier = config.uses === "T2" ? T2 : U2;
     const value = roll * multiplier;
     total += value;
@@ -688,7 +712,10 @@ function computeGDP(provinces, foodPerProvince, energyPerProvince, populationPer
     const population = populationPerProvince[i] ? populationPerProvince[i].population : 0;
     const modifier = computeGDPModifier(foodValue, energyValue, population);
     const range = GDP_RANGE[p.econ];
-    const base = range ? randFloat(range[0], range[1]) : 0;
+    // Fixed per province (gdpBase, baked into data.js); the modifier above
+    // still depends on the claim's current food/energy/population values,
+    // so it stays dynamic. Falls back to a fresh roll if gdpBase is missing.
+    const base = p.gdpBase != null ? p.gdpBase : (range ? randFloat(range[0], range[1]) : 0);
     const gdpValue = Math.round(base * modifier);
     total += gdpValue;
     return { label: p.label, econ: p.econ, modifier, base: Math.round(base), gdp: gdpValue };
@@ -836,21 +863,6 @@ const ECONOMY_TYPES = [
   { name: "Non-Industrial Economy",              tier: 2, pct: t => t.Services + t.Extraction },
 ];
 
-// Non-Industrial is reserved for genuinely low-industry, extraction-driven
-// economies (petro-states and similar). Without this gate it wins far too
-// often: Manufacturing is split into Light + Heavy, so any Services +
-// Extraction pairing out-scores every pairing that uses only one half of
-// Manufacturing - even when total Manufacturing is as large as either.
-// Claims that fail the gate fall through to the next-best tier 2 pairing.
-const NON_INDUSTRIAL_MAX_MANUFACTURING = 25;
-const NON_INDUSTRIAL_MIN_EXTRACTION = 35;
-
-function qualifiesAsNonIndustrial(sectorTotals) {
-  const manufacturing = (sectorTotals.LightIndustry || 0) + (sectorTotals.HeavyIndustry || 0);
-  return manufacturing <= NON_INDUSTRIAL_MAX_MANUFACTURING &&
-    (sectorTotals.Extraction || 0) >= NON_INDUSTRIAL_MIN_EXTRACTION;
-}
-
 function classifyEconomy(sectorTotals) {
   const tier1 = ECONOMY_TYPES.filter(e => e.tier === 1)
     .map(e => ({ name: e.name, pct: e.pct(sectorTotals) }))
@@ -859,7 +871,6 @@ function classifyEconomy(sectorTotals) {
   const pool = tier1.length > 0
     ? tier1
     : ECONOMY_TYPES.filter(e => e.tier === 2)
-        .filter(e => e.name !== "Non-Industrial Economy" || qualifiesAsNonIndustrial(sectorTotals))
         .map(e => ({ name: e.name, pct: e.pct(sectorTotals) }))
         .filter(e => e.pct > 50);
 
@@ -1039,17 +1050,13 @@ function describeClimate(name) {
 
 // ---- Energy Resources (Coal / Natural Gas / Oil / Uranium) per province ----
 //
-// Each province's specific energy resource is rolled per-generation, using
-// its climate as weighting - matches this project's existing pattern where
-// climate is a fixed province property but economy/food/energy/population
-// OUTPUTS are randomized on each "Generate" click, not baked in.
-//
-// TEMPORARY, PER USER'S OWN NOTE: this is meant to eventually be replaced
-// once the province data itself is finalized on the map - at that point,
-// each province's resource type should be rolled ONCE and hardcoded into
-// data.js (the same way climate.dominant already is), rather than
-// re-rolled every time a bio is generated. Flagging this in code as well
-// as here so it isn't lost.
+// Each Energy Focused/Oriented province's specific energy resource is now
+// rolled once and baked into data.js as `resourceType` (null there means
+// it was rolled and came up with no climate match, same as skipping it
+// below) - the province map is finalized, so this no longer needs to be
+// re-rolled on every "Generate" click. weightedPick/RESOURCE_WEIGHTS_BY_
+// CLIMATE stay here as the fallback path for a province that hasn't had
+// its own roll baked in yet.
 //
 // Percentages are given by the source table; the four keys per row always
 // sum to 100. Two rows in the source table (Tundra, Humid Sub-tropical)
@@ -1099,10 +1106,19 @@ function rollProvinceResources(provinces) {
     // shouldn't come up as sitting on Coal/Oil/etc. just because its
     // climate would statistically favor it.
     if (p.econ !== "Energy Focused" && p.econ !== "Energy Oriented") return;
-    const climate = p.climate && p.climate.dominant;
-    const weights = climate && RESOURCE_WEIGHTS_BY_CLIMATE[climate];
-    if (!weights) return;
-    const resource = weightedPick(weights);
+    let resource;
+    if ("resourceType" in p) {
+      // Already rolled once and baked into data.js. null means it was
+      // rolled and had no climate match (same case the fallback below
+      // skips), so only a defined, non-null value counts as a resource.
+      if (p.resourceType == null) return;
+      resource = p.resourceType;
+    } else {
+      const climate = p.climate && p.climate.dominant;
+      const weights = climate && RESOURCE_WEIGHTS_BY_CLIMATE[climate];
+      if (!weights) return;
+      resource = weightedPick(weights);
+    }
     if (!byResource[resource]) byResource[resource] = [];
     byResource[resource].push(p.label);
   });

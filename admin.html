@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin &mdash; Manage Claims</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="admin.css">
+<meta name="robots" content="noindex, nofollow">
+</head>
+<body class="admin-page">
+
+<div class="admin-wrap">
+  <div class="admin-header">
+    <div>
+      <h1>Manage Claims</h1>
+      <p class="admin-sub">Record accepted land claims. Provinces recorded here are locked on the map for everyone once you export and commit this list.</p>
+    </div>
+    <a class="back-link" href="index.html">&larr; Back to map</a>
+  </div>
+
+  <div class="admin-banner" id="notFoundBanner" hidden>
+    <strong>Heads up:</strong> couldn't load <code>claims.json</code> from this folder (it may not exist yet, or this page was opened without a local server). Starting from an empty list &mdash; exporting will create the file fresh.
+  </div>
+
+  <div class="admin-banner warn" id="draftBanner" hidden>
+    <strong>Unsaved changes found</strong> from a previous session that don't match the current <code>claims.json</code>.
+    <button class="btn-small" id="restoreDraftBtn">Restore them</button>
+    <button class="btn-small" id="discardDraftBtn">Discard, reload from file</button>
+  </div>
+
+  <div class="admin-card">
+    <h2>Record a new claim</h2>
+    <div class="admin-form-row">
+      <label for="claimantName">Nation / Claimant name</label>
+      <input type="text" id="claimantName" placeholder="e.g. Astoria">
+    </div>
+    <div class="admin-form-row">
+      <label for="adminClaimCode">Claim code</label>
+      <input type="text" id="adminClaimCode" placeholder="e.g. S9, S12*, N4  (star a label for the capital)">
+    </div>
+    <div class="admin-form-actions">
+      <button class="btn-primary" id="recordClaimBtn">Record Claim</button>
+      <button class="btn-secondary" id="cancelEditBtn" hidden>Cancel edit</button>
+    </div>
+    <div class="admin-form-msg" id="formMsg"></div>
+  </div>
+
+  <div class="admin-card">
+    <div class="admin-card-header">
+      <h2>Accepted claims</h2>
+      <div class="admin-stat" id="claimStat"></div>
+    </div>
+    <table class="claims-table" id="claimsTable">
+      <thead>
+        <tr><th>Nation</th><th>Provinces</th><th>Recorded</th><th></th></tr>
+      </thead>
+      <tbody id="claimsTableBody"></tbody>
+    </table>
+    <div class="claims-empty" id="claimsEmpty" hidden>No claims recorded yet.</div>
+  </div>
+
+  <div class="admin-card">
+    <h2>Sync with the repo</h2>
+    <p class="admin-note">
+      This page only edits a working copy in your browser. To make claims live on the map for everyone,
+      export the file below and commit it to the repo as <code>claims.json</code>, replacing the existing one.
+    </p>
+    <div class="admin-form-actions">
+      <button class="btn-secondary" id="exportBtn">Export claims.json</button>
+      <label class="btn-secondary file-btn">
+        Import claims.json
+        <input type="file" id="importInput" accept="application/json" hidden>
+      </label>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="claims.js"></script>
+<script src="admin.js"></script>
+<script src="theme.js"></script>
+</body>
+</html>

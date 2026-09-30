@@ -7,16 +7,10 @@
  * "Publish to the web" CSV feed - reversed from a typical spreadsheet
  * layout: instead of one row per nation with a column per field, this
  * sheet runs sideways. Row 2 holds every nation's name, one per column;
- * row 23 holds the matching claim code, in the SAME column position
+ * row 20 holds the matching claim code, in the SAME column position
  * (column C's name pairs with column C's claim code, and so on). Column A
  * is assumed to be a row label ("Nation" / "Claim Code"), not actual
  * data - real entries start at column B. Flag if that's wrong.
- *
- * Row 23 (not 20) because the FR sheet's admin-info block that populates
- * this tab's rows gained three new fields (Classification, Capital,
- * Government Type) ahead of Claim Code, pushing every row from Claim Code
- * onward down by 3. Nation's row didn't move - it's still the very first
- * field in that block.
  *
  * Each claim record returned:
  *   { id: "col-2", name: "Testlandia", provinces: ["S9","S12"], capital: "S9", dateAdded: null }
@@ -54,9 +48,7 @@
   const CLAIMS_SHEET_CSV_URL =
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vR7W_8C-QWQO6AmHUYrvI4FdlyTMRV3qe65QIF-abGoH_YZRexNYMvCQQfLyJPWM_vQn_x26rVS_xmF/pub?gid=1336017158&single=true&output=csv";
   const NATION_ROW_INDEX = 1;       // row 2 (0-indexed)
-  const CLAIM_CODE_ROW_INDEX = 22;  // row 23 (0-indexed) - shifted from row 20 when
-                                     // Classification/Capital/Government Type were
-                                     // inserted into the FR admin-info block ahead of Claim Code
+  const CLAIM_CODE_ROW_INDEX = 19;  // row 20 (0-indexed)
   const FIRST_DATA_COLUMN = 1;      // column B (0-indexed) - column A assumed to be a row label
 
   // Minimal CSV row parser (handles quoted fields, escaped quotes) - no
@@ -183,7 +175,7 @@
   }
 
   // Diagnostic helper - fetches the sheet and dumps exactly what row 2 and
-  // row 23 (plus a few neighbors) actually contain, so a layout mismatch
+  // row 20 (plus a few neighbors) actually contain, so a layout mismatch
   // can be spotted directly instead of guessed at. Run in the console:
   //   window.ClaimsStore.debugDump()
   function debugDump() {
@@ -204,9 +196,9 @@
         console.log("[ClaimsStore debug] Row 1 (index 0):", rows[0]);
         console.log("[ClaimsStore debug] Row 2 (index 1) - expected nation names:", rows[1]);
         console.log("[ClaimsStore debug] Row 3 (index 2):", rows[2]);
-        console.log("[ClaimsStore debug] Row 22 (index 21):", rows[21]);
-        console.log("[ClaimsStore debug] Row 23 (index 22) - expected claim codes:", rows[22]);
-        console.log("[ClaimsStore debug] Row 24 (index 23):", rows[23]);
+        console.log("[ClaimsStore debug] Row 19 (index 18):", rows[18]);
+        console.log("[ClaimsStore debug] Row 20 (index 19) - expected claim codes:", rows[19]);
+        console.log("[ClaimsStore debug] Row 21 (index 20):", rows[20]);
       })
       .catch(function (e) {
         console.warn("[ClaimsStore debug] Fetch/parse failed:", e.message);
@@ -217,6 +209,6 @@
     loadClaims: loadClaims,
     buildProvinceIndex: buildProvinceIndex,
     debugDump: debugDump,
-    VERSION: "2026-09-27-claim-code-row-23",
+    VERSION: "2026-09-07-row-based-rebuild",
   };
 })();

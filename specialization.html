@@ -9,8 +9,6 @@
 </head>
 <body class="spec-page">
 
-<a class="credit-link" href="https://www.nationstates.net/region=rylet" target="_blank" rel="noopener">Originally built for the Rylet Region of NationStates</a>
-
 <div class="spec-wrap">
 
   <div class="spec-header">
@@ -32,7 +30,7 @@
          page builds on top of these, it doesn't change them. -->
     <div class="spec-card spec-snapshot">
       <div class="snapshot-grid">
-        <div class="snapshot-item"><span class="snapshot-label">Provinces</span><span class="snapshot-value" id="snapProvinces">&mdash;</span></div>
+        <div class="snapshot-item"><span class="snapshot-label">Nation</span><span class="snapshot-value" id="snapNation">&mdash;</span></div>
         <div class="snapshot-item"><span class="snapshot-label">Economy Type</span><span class="snapshot-value" id="snapEconomy">&mdash;</span></div>
         <div class="snapshot-item"><span class="snapshot-label">Population</span><span class="snapshot-value" id="snapPopulation">&mdash;</span></div>
         <div class="snapshot-item"><span class="snapshot-label">GDP</span><span class="snapshot-value" id="snapGDP">&mdash;</span></div>
@@ -98,7 +96,8 @@
     <!-- ===== Step 3: Adjust Energy/Agricultural Production ===== -->
     <div class="spec-card step-panel" id="step3" data-step-panel="3" hidden>
       <h2>Step 3 &middot; Adjust Energy &amp; Agricultural Production</h2>
-      <p class="step-intro">Your chosen specializations shift these figures automatically.</p>
+      <p class="step-intro">Your chosen specializations shift these figures automatically. Food Production
+        adjustments aren't wired up yet - Energy Production below reflects your actual picks.</p>
       <div class="spec-chosen-summary" id="chosenSummary"><!-- populated by specialization.js --></div>
       <div class="adjust-row">
         <div class="adjust-field">
@@ -112,86 +111,35 @@
         </div>
         <div class="adjust-field">
           <label>Food Production</label>
-          <div class="adjust-result">
-            <span class="adjust-original" id="adjFoodOriginal">&mdash;</span>
-            <span class="adjust-arrow">&rarr;</span>
+          <div class="adjust-controls">
+            <button class="adjust-btn" disabled>&minus;</button>
             <span class="adjust-value" id="adjFoodValue">&mdash;</span>
+            <button class="adjust-btn" disabled>+</button>
           </div>
-          <div class="adjust-breakdown" id="adjFoodBreakdown"><!-- populated by specialization.js --></div>
         </div>
       </div>
+      <p class="spec-placeholder-note">(Food Production adjustment formulas will go here.)</p>
     </div>
 
     <!-- ===== Step 4: Adjust Population ===== -->
     <div class="spec-card step-panel" id="step4" data-step-panel="4" hidden>
       <h2>Step 4 &middot; Adjust Population</h2>
-      <p class="step-intro">Choosing a population level away from your stable population shows the resulting
-        headcount below, along with how it affects GDP, Food Production, and Energy Production.</p>
+      <p class="step-intro">Choosing a population level away from your stable population will affect Energy
+        Production, Food Production, and GDP. This step is a placeholder for now - no formulas are wired up yet.</p>
       <div class="pop-adjust-row">
         <label for="specPopAdjust">Population level</label>
         <select id="specPopAdjust">
           <option value="-90">-90%</option>
-          <option value="-80">-80%</option>
-          <option value="-70">-70%</option>
           <option value="-60">-60%</option>
-          <option value="-50">-50%</option>
-          <option value="-40">-40%</option>
           <option value="-30">-30%</option>
-          <option value="-20">-20%</option>
-          <option value="-10">-10%</option>
           <option value="0" selected>0% (Stable)</option>
-          <option value="10">+10%</option>
-          <option value="20">+20%</option>
           <option value="30">+30%</option>
-          <option value="40">+40%</option>
-          <option value="50">+50%</option>
           <option value="60">+60%</option>
-          <option value="70">+70%</option>
-          <option value="80">+80%</option>
           <option value="90">+90%</option>
-          <option value="100">+100%</option>
-          <option value="110">+110%</option>
           <option value="120">+120%</option>
         </select>
       </div>
-      <div class="adjust-row">
-        <div class="adjust-field">
-          <label>Population</label>
-          <div class="adjust-result">
-            <span class="adjust-original" id="adjPopulationOriginal">&mdash;</span>
-            <span class="adjust-arrow">&rarr;</span>
-            <span class="adjust-value" id="adjPopulationValue">&mdash;</span>
-          </div>
-          <div class="adjust-breakdown" id="adjPopulationBreakdown"><!-- populated by specialization.js --></div>
-        </div>
-        <div class="adjust-field">
-          <label>GDP</label>
-          <div class="adjust-result">
-            <span class="adjust-original" id="adjGDPOriginal">&mdash;</span>
-            <span class="adjust-arrow">&rarr;</span>
-            <span class="adjust-value" id="adjGDPValue">&mdash;</span>
-          </div>
-          <div class="adjust-breakdown" id="adjGDPBreakdown"><!-- populated by specialization.js --></div>
-        </div>
-        <div class="adjust-field">
-          <label>Food Production</label>
-          <div class="adjust-result">
-            <span class="adjust-original" id="adjPopFoodOriginal">&mdash;</span>
-            <span class="adjust-arrow">&rarr;</span>
-            <span class="adjust-value" id="adjPopFoodValue">&mdash;</span>
-          </div>
-          <div class="adjust-breakdown" id="adjPopFoodBreakdown"><!-- populated by specialization.js --></div>
-        </div>
-        <div class="adjust-field">
-          <label>Energy Production</label>
-          <div class="adjust-result">
-            <span class="adjust-original" id="adjPopEnergyOriginal">&mdash;</span>
-            <span class="adjust-arrow">&rarr;</span>
-            <span class="adjust-value" id="adjPopEnergyValue">&mdash;</span>
-          </div>
-          <div class="adjust-breakdown" id="adjPopEnergyBreakdown"><!-- populated by specialization.js --></div>
-        </div>
-      </div>
+      <p class="spec-placeholder-note">(Population-adjustment formulas will go here.)</p>
     </div>
 
     <!-- ===== Step 5: National Identity + Citizen Card BBC ===== -->
@@ -217,26 +165,32 @@
         <input type="text" id="identityGovernment" placeholder="e.g. Constitutional Monarchy, Parliamentary Republic">
       </div>
 
-      <h3 class="mil-subheading">Potential Imports</h3>
-      <div class="spec-chosen-summary" id="potentialImportsList"><!-- populated by specialization.js --></div>
-
-      <h3 class="mil-subheading">Your Claim Map</h3>
-      <p class="step-intro">A snapshot of your claimed provinces, carried over from your land bio - download it to attach
-        as an image in your application.</p>
-      <div class="claim-map-color-row">
-        <label for="claimMapColorPicker">Highlight Color</label>
-        <input type="color" id="claimMapColorPicker" value="#e0a83e">
-        <input type="text" id="claimMapColorHex" class="claim-map-hex-input" value="#e0a83e" placeholder="#e0a83e" maxlength="7" autocomplete="off" spellcheck="false">
-      </div>
-      <div class="claim-map-section" id="claimMapDisplay"><!-- populated by specialization.js --></div>
-
-      <h3 class="mil-subheading">Next Steps</h3>
-      <p class="step-intro">Send your Application to <a href="https://www.nationstates.net/nation=rylet" target="_blank" rel="noopener">Rylet</a> to await approval.</p>
-
       <div class="quick-fill-row">
-        <button type="button" class="btn-primary" id="copyFullApplicationBtn">Full Application</button>
+        <button type="button" class="btn-primary" id="copyCitizenCardBtn">Copy Citizen Card BBC Code</button>
       </div>
-      <textarea id="fullApplicationSource" readonly></textarea>
+      <textarea id="citizenCardSource" readonly></textarea>
+    </div>
+
+    <!-- ===== Final summary, shown after Step 4 ===== -->
+    <div class="spec-card step-panel" id="stepSummary" data-step-panel="summary" hidden>
+      <h2>Summary</h2>
+      <div class="summary-block">
+        <div class="summary-label">Chosen Specializations</div>
+        <div id="summarySpecs">&mdash;</div>
+      </div>
+      <div class="summary-block">
+        <div class="summary-label">Military Specialization</div>
+        <div id="summaryMilitary">&mdash;</div>
+      </div>
+      <div class="summary-block">
+        <div class="summary-label">Population Level</div>
+        <div id="summaryPopLevel">&mdash;</div>
+      </div>
+      <div class="summary-block">
+        <div class="summary-label">National Identity</div>
+        <div id="summaryIdentity">&mdash;</div>
+      </div>
+      <p class="spec-placeholder-note">This is as far as the skeleton goes for now - nothing here is saved yet.</p>
     </div>
 
     <div class="spec-nav">
