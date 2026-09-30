@@ -422,6 +422,44 @@ body.spec-page {
   margin-bottom: 16px;
   line-height: 1.6;
 }
+
+/* ---- step 5: claim map snapshot (handed off from the bio page) ---- */
+.claim-map-section { margin-bottom: 16px; }
+.claim-map-section .map-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.claim-map-section .map-shot {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--parchment);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px;
+}
+.claim-map-section .map-shot svg { width: 100%; height: auto; display: block; }
+.claim-map-section .map-shot-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--ink-soft);
+  text-align: center;
+  margin-top: 6px;
+}
+.claim-map-section .map-shot-download {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+.claim-map-empty {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-style: italic;
+  color: var(--ink-soft);
+}
 .adjust-row {
   display: flex;
   gap: 20px;

@@ -1253,16 +1253,28 @@
   }
 
   // Same idea, projected onto the globe's own screen space instead of the
-  // flat map's: a compass-rose network built with the exact same
-  // starPath()/buildCompassRose() helpers above (they only take a focal
-  // point + reach, no flat-map-specific coordinates), then clipped to the
-  // sphere's own circle so lines never spray past the globe's visible disc
-  // into the empty square around it. The circle is defined once from
-  // baseGlobeScale (the projection's un-zoomed .scale()) rather than
-  // projection.scale()/.translate() at call time - both stay fixed across
-  // drag-to-rotate (only .rotate() changes) and zoom is a CSS transform on
-  // the whole <svg>, not a projection change, so a static circle here stays
-  // aligned with the sphere on every frame without needing to be rebuilt.
+  // flat map's - but anchored to fixed [lon, lat] points on the sphere
+  // (rather than fixed screen positions) so the roses stay put over their
+  // patch of geography and swing around with the globe as it's dragged,
+  // the same way globeGraticuleEl's lat/lon grid already does. One rose
+  // near the "center" of the default view plus four spread around it;
+  // exact coordinates are arbitrary (this is decorative dressing, not real
+  // navigation data), just spaced apart. Positions are recomputed every
+  // frame by updateGlobeRhumbLines() (called from renderGlobe()); this
+  // only builds the static clip circle the roses draw into. The clip
+  // circle itself is still fine to build once - it's sized from
+  // baseGlobeScale (the projection's un-zoomed .scale()), and that plus
+  // the group's own centered translate stay fixed across drag-to-rotate
+  // (only .rotate() changes) and zoom (a CSS transform on the whole <svg>,
+  // not a projection change).
+  const GLOBE_ROSE_GEO = [
+    { lon: 0, lat: 0, scale: 1.4, weight: 1 },      // center rose
+    { lon: 0, lat: 58, scale: 0.55, weight: 0.7 },  // north
+    { lon: 0, lat: -58, scale: 0.55, weight: 0.7 }, // south
+    { lon: -85, lat: 0, scale: 0.55, weight: 0.7 }, // west
+    { lon: 85, lat: 0, scale: 0.55, weight: 0.7 },  // east
+  ];
+
   function buildGlobeRhumbLines(){
     const g = svgEl('g', { class: 'rhumb-lines' });
     g.style.pointerEvents = 'none';
@@ -1274,16 +1286,32 @@
     defs.appendChild(clip);
     g.appendChild(defs);
     g.setAttribute('clip-path', 'url(#' + clipId + ')');
-    const reach = baseGlobeScale * 1.6;
-    const edgeRoses = [
-      { x: cx, y: cy - baseGlobeScale * 0.62 },
-      { x: cx, y: cy + baseGlobeScale * 0.62 },
-      { x: cx - baseGlobeScale * 0.62, y: cy },
-      { x: cx + baseGlobeScale * 0.62, y: cy },
-    ];
-    edgeRoses.forEach(function(fp){ buildCompassRose(g, fp, reach, { scale: 0.55, weight: 0.7 }); });
-    buildCompassRose(g, { x: cx, y: cy }, reach, { scale: 1.4, weight: 1 });
+    // Rose network itself lives in its own child <g>, rebuilt every frame
+    // by updateGlobeRhumbLines() - keeping defs/clip-path on the outer <g>
+    // means that part never needs touching again after this initial build.
+    g.appendChild(svgEl('g', { class: 'rhumb-roses' }));
     return g;
+  }
+
+  // Rebuilds the rose network from GLOBE_ROSE_GEO against the projection's
+  // current rotation, called every render frame (see renderGlobe()) - same
+  // visibility test the capital marker uses (angularDistance from the
+  // view's center point < 90 degrees) so a rose rotated onto the far side
+  // of the globe is skipped instead of drawing through the sphere.
+  function updateGlobeRhumbLines(){
+    if (!globeRhumbLinesGroup) return;
+    const rosesG = globeRhumbLinesGroup.querySelector('.rhumb-roses');
+    if (!rosesG) return;
+    rosesG.innerHTML = '';
+    const rotate = projection.rotate();
+    const viewLon = -rotate[0], viewLat = -rotate[1];
+    const reach = baseGlobeScale * 1.6;
+    GLOBE_ROSE_GEO.forEach(function(rose){
+      if (angularDistance(rose.lon, rose.lat, viewLon, viewLat) >= Math.PI / 2) return;
+      const xy = projection([rose.lon, rose.lat]);
+      if (!xy) return;
+      buildCompassRose(rosesG, { x: xy[0], y: xy[1] }, reach, { scale: rose.scale, weight: rose.weight });
+    });
   }
 
   // Modern-only flat-map dressing: a plain equirectangular lon/lat grid -
@@ -1972,6 +2000,7 @@
     try {
       globeSphereEl.setAttribute('d', pathGen({ type: 'Sphere' }) || '');
       if (globeGraticuleEl) globeGraticuleEl.setAttribute('d', pathGen(d3.geoGraticule()()) || '');
+      if (globeRhumbLinesGroup && globeRhumbLinesGroup.style.display !== 'none') updateGlobeRhumbLines();
       if (globeLandEl){
         let d = '';
         globeLandFeatures.forEach(function(f){

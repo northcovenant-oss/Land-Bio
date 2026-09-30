@@ -762,6 +762,7 @@
       '          worldExports: worldExportsRanking(),\n' +
       '          claimCode: (function(){ var el = document.getElementById("claimCodeValue"); return el ? el.textContent.trim() : ""; })(),\n' +
       '          perProvinceEnergy: (function(){ var el = document.getElementById("perProvinceEnergyData"); try { return el ? JSON.parse(el.textContent) : []; } catch(e){ return []; } })(),\n' +
+      '          claimMapHtml: (function(){ var el = document.querySelector(".claim-map .map-row"); return el ? el.innerHTML : ""; })(),\n' +
       '        };\n' +
       '        try {\n' +
       '          localStorage.setItem("landClaimSpecializationSnapshot", JSON.stringify(snapshot));\n' +
