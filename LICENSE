@@ -25,12 +25,14 @@ SOFTWARE.
 NOTE ON SCOPE:
 
 This MIT license applies to the tool itself — the code that renders and runs
-the interactive map (index.html, style.css, map.js, landbio.js, and the
-general structure/logic of data.js).
+the interactive map and its companion pages (all .html, .css and .js files
+in this repository, and the general structure/logic of data.js and
+specialization-data.js). Third-party code in vendor/ keeps its own license.
 
 It does NOT extend to the world-specific content contained in this repository,
 including but not limited to: province geometry, names, and boundaries;
 climate, terrain, and economic-output data and their categorization; the
+specialization pools and import tables in specialization-data.js; the
 underlying world map (SVG/raster source files); and any lore, place names, or
 setting material derived from them. That content is proprietary and all
 rights are reserved — see NOTICE for details.
