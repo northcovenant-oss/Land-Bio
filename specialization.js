@@ -1087,8 +1087,155 @@
 
     if(step === 3){ renderChosenSummary(); renderEnergyAdjustment(); renderFoodAdjustment(); }
     if(step === 4) renderPopulationAdjustment();
-    if(step === 5) renderPotentialImports();
+    if(step === 5){ renderClaimMap(); renderPotentialImports(); }
     updateNextButtonState();
+  }
+
+  // ---- Step 5: claim map snapshot (handed off from the bio page) ----
+  //
+  // map.js embeds a ready-made "map of your claim" SVG (one per continent
+  // the claim touches, gold-outlined provinces on the same neutral fill
+  // used elsewhere) directly on the bio page, and captures that same
+  // markup into snapshot.claimMapHtml when "Continue to Specialization" is
+  // clicked. Older snapshots saved before this existed simply won't have
+  // it - handled the same "show a note, don't error" way as every other
+  // optional snapshot field on this page.
+  //
+  // Rendered once (guarded by claimMapRendered) rather than every time
+  // Step 5 is shown, since the map itself never changes and rebuilding it
+  // repeatedly would just detach/reattach the same SVGs for no reason.
+  let claimMapRendered = false;
+
+  // Rasterizes one of the claim-map SVGs to a PNG and triggers a browser
+  // download - SVG is what's embedded, but a plain image file is far more
+  // useful for actually attaching to a forum post than raw SVG markup
+  // would be. Draws through an off-screen <img>/<canvas> pair (the
+  // standard way to rasterize inline SVG client-side); upscaled 3x off the
+  // SVG's own viewBox dimensions so the exported image isn't blurry when
+  // embedded larger than the on-page thumbnail.
+  function downloadSvgAsPng(svgEl, filename){
+    const svgString = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = function(){
+      const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+      const scale = 3;
+      const width = (vb && vb.width) ? vb.width : (svgEl.clientWidth || 800);
+      const height = (vb && vb.height) ? vb.height : (svgEl.clientHeight || 600);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(svgUrl);
+      canvas.toBlob(function(blob){
+        if(!blob) return;
+        const dlUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = dlUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(dlUrl); }, 1000);
+      }, 'image/png');
+    };
+    img.onerror = function(){
+      URL.revokeObjectURL(svgUrl);
+      console.warn('[Specialization] Could not rasterize the claim map for download.');
+    };
+    img.src = svgUrl;
+  }
+
+  function renderClaimMap(){
+    const el = document.getElementById('claimMapDisplay');
+    if(!el || claimMapRendered) return;
+    claimMapRendered = true;
+
+    if(!snapshot.claimMapHtml){
+      el.innerHTML = '<p class="claim-map-empty">No claim map was captured for this claim (an older bio snapshot, ' +
+        'most likely, from before this feature existed) - go back and re-generate your bio if you want one.</p>';
+      return;
+    }
+
+    const row = document.createElement('div');
+    row.className = 'map-row';
+    row.innerHTML = snapshot.claimMapHtml;
+    el.appendChild(row);
+
+    row.querySelectorAll('.map-shot').forEach(function(shot){
+      const svg = shot.querySelector('svg');
+      if(!svg) return;
+      const labelEl = shot.querySelector('.map-shot-label');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-secondary map-shot-download';
+      btn.textContent = 'Download Image';
+      btn.addEventListener('click', function(){
+        const nationBit = (document.getElementById('identityNation').value.trim() || 'claim').replace(/[^a-z0-9]+/gi, '_');
+        const continentBit = (labelEl ? labelEl.textContent.trim() : 'map').replace(/[^a-z0-9]+/gi, '_');
+        downloadSvgAsPng(svg, nationBit + '_' + continentBit + '_map.png');
+      });
+      shot.appendChild(btn);
+    });
+
+    initClaimMapColorPicker(row);
+  }
+
+  // ---- Step 5: claim map color picker ----
+  //
+  // map.js marks every claimed province path (and the capital seal) with
+  // a "claim-fill" class specifically so this page can find and recolor
+  // them after the SVG has already been baked into snapshot.claimMapHtml
+  // - the color picker and hex box here just set that attribute directly
+  // on the live DOM elements, and the download button (above) rasterizes
+  // whatever the SVG currently looks like, so a recolor always carries
+  // through to the downloaded PNG.
+  function normalizeHexColor(raw){
+    const s = String(raw || '').trim().replace(/^#/, '');
+    if(/^[0-9a-f]{6}$/i.test(s)) return '#' + s.toLowerCase();
+    if(/^[0-9a-f]{3}$/i.test(s)){
+      return '#' + s.toLowerCase().split('').map(function(c){ return c + c; }).join('');
+    }
+    return null;
+  }
+
+  function initClaimMapColorPicker(row){
+    const colorPicker = document.getElementById('claimMapColorPicker');
+    const hexInput = document.getElementById('claimMapColorHex');
+    if(!colorPicker || !hexInput) return;
+
+    const claimFillEls = row.querySelectorAll('.claim-fill');
+    if(claimFillEls.length === 0) return; // nothing to recolor (e.g. no capital, no claimed provinces somehow)
+
+    // Starting color is whatever map.js already baked in (the theme's
+    // gold), not a hardcoded default, so the picker reflects the map
+    // exactly as shown before anyone touches it.
+    const currentFill = normalizeHexColor(claimFillEls[0].getAttribute('fill')) || '#e0a83e';
+    colorPicker.value = currentFill;
+    hexInput.value = currentFill;
+
+    function applyColor(hex){
+      claimFillEls.forEach(function(elm){ elm.setAttribute('fill', hex); });
+    }
+
+    colorPicker.addEventListener('input', function(){
+      hexInput.value = colorPicker.value;
+      hexInput.classList.remove('invalid');
+      applyColor(colorPicker.value);
+    });
+
+    hexInput.addEventListener('input', function(){
+      const normalized = normalizeHexColor(hexInput.value);
+      if(!normalized){
+        hexInput.classList.add('invalid');
+        return;
+      }
+      hexInput.classList.remove('invalid');
+      colorPicker.value = normalized;
+      applyColor(normalized);
+    });
   }
 
   // ---- Step 5: potential imports for the 5 chosen specializations ----
