@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Poppins:wght@500;600;700&family=Inter:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Cormorant+Garamond:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 
 /* ============================================================
    THEME SYSTEM
@@ -36,8 +36,27 @@ body.theme-modern{
   --seal-red: #e0473e;
   --water: #3f8fd1;
   --neutral-fill: #ffffff;
-  --font-display: 'Poppins', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'EB Garamond', serif;
+  --line: rgba(28,37,48,0.15);
+  --panel-bg: #ffffff;
+}
+
+/* Relief reuses Modern's site chrome (panels/text/buttons) - the terrain
+   look itself lives entirely in globe.js's own SVG gradients/filters, not
+   in these variables, so there's nothing terrain-specific to define here. */
+body.theme-relief{
+  --parchment: #eef2f6;
+  --parchment-dark: #4a90d9;
+  --ink: #1c2530;
+  --ink-soft: #51617a;
+  --gold: #2f6fed;
+  --gold-bright: #4d8bff;
+  --seal-red: #e0473e;
+  --water: #3f8fd1;
+  --neutral-fill: #ffffff;
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'EB Garamond', serif;
   --line: rgba(28,37,48,0.15);
   --panel-bg: #ffffff;
 }
@@ -50,10 +69,10 @@ body.theme-dark{
   --gold: #c9a54a;
   --gold-bright: #e6c169;
   --seal-red: #d9564a;
-  --water: #2c4a5e;
+  --water: #000000;
   --neutral-fill: #2e323c;
-  --font-display: 'Cinzel', serif;
-  --font-body: 'Inter', sans-serif;
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'EB Garamond', serif;
   --line: rgba(233,230,223,0.15);
   --panel-bg: #20232c;
 }
@@ -488,6 +507,7 @@ path.extra-island{
 }
 .swatch-parchment{ background: linear-gradient(135deg, #ece0c2 50%, #78b464 50%); }
 .swatch-modern{ background: linear-gradient(135deg, #4a90d9 50%, #ffffff 50%); }
+.swatch-relief{ background: linear-gradient(135deg, #2f7fae 45%, #8aa66a 45% 75%, #d8d8d2 75%); }
 .swatch-dark{ background: linear-gradient(135deg, #12141a 50%, #2e323c 50%); }
 .theme-name{
   font-family: var(--font-body);
