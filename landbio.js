@@ -104,7 +104,9 @@ function computeEconomics(provinces) {
     .map(p => ({ label: p.label, econ: p.econ, split: computeSectorSplit(p.econ) }))
     .filter(entry => entry.split);
   const sectorSplits = perProvinceSectors.map(entry => entry.split);
-  const sectorTotals = sectorSplits.length > 0 ? computeSectorTotals(sectorSplits) : null;
+  const sectorTotals = sectorSplits.length > 0
+    ? computeSectorTotals(sectorSplits, perProvinceSectors.map(entry => entry.econ))
+    : null;
   const classification = sectorTotals ? classifyEconomy(sectorTotals) : null;
 
   // Population: each province rolled independently (base 400,000-3 million x
@@ -773,12 +775,77 @@ function computeSectorSplit(econName) {
 // unsplit Light+Heavy total, kept around for the BBC code's ranked
 // Primary/Secondary/Tertiary columns, which mirror the forum template's
 // fixed 3-column structure rather than this 4-way breakdown).
-function computeSectorTotals(splits) {
+// ---- claim-level weighting ----
+//
+// Two adjustments applied when the per-province splits are combined into
+// the claim's overall breakdown:
+//
+//   1. Majority weighting. Province types are grouped into five families
+//      (Service, Production, Agriculture, Mineral, Energy - Focused and
+//      Oriented together). If MORE than half of the claim's provinces
+//      belong to one family (for Service: more than half Service FOCUSED,
+//      Oriented doesn't count), each of those provinces counts
+//      MAJORITY_FAMILY_WEIGHT times in the average instead of once, so a
+//      player who deliberately builds around one kind of land gets an
+//      economy that leans further that way.
+//
+//   2. Service dampening. If LESS than half of the claim's provinces are
+//      Service (Focused or Oriented), the combined Services share is
+//      multiplied by SERVICE_DAMPENING and the points taken away are
+//      shared out among Light Industry, Heavy Industry and Extraction in
+//      proportion to their size - so mixed claims lean towards goods and
+//      materials economies instead of defaulting to services.
+//
+// Set MAJORITY_FAMILY_WEIGHT to 1 or SERVICE_DAMPENING to 1 to switch
+// either adjustment off.
+const MAJORITY_FAMILY_WEIGHT = 1.5;
+const SERVICE_DAMPENING = 0.75;
+
+function econFamily(econName) {
+  return econName ? String(econName).split(" ")[0] : "";
+}
+
+// Which family (if any) makes up more than half of the claim. Service is
+// the exception: it only counts as the majority when Service FOCUSED
+// provinces alone are more than half (Service Oriented doesn't count
+// towards it), so pure service economies need a deliberately urban claim.
+function majorityFamily(econs) {
+  if (!econs || econs.length === 0) return null;
+  const counts = countBy(econs.filter(e => econFamily(e) !== "Service"), econFamily);
+  counts.Service = econs.filter(e => e === "Service Focused").length;
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return top && top[1] > econs.length / 2 ? top[0] : null;
+}
+
+// Whether a province gets the majority weight: every member of the majority
+// family, except that a Service majority only boosts Service Focused.
+function getsMajorityWeight(econName, majority) {
+  if (!majority) return false;
+  if (majority === "Service") return econName === "Service Focused";
+  return econFamily(econName) === majority;
+}
+
+function computeSectorTotals(splits, econs) {
   const allKeys = ["Services", "Extraction", "LightIndustry", "HeavyIndustry"];
+  const majority = majorityFamily(econs);
+  const weights = splits.map((sp, i) =>
+    econs && getsMajorityWeight(econs[i], majority) ? MAJORITY_FAMILY_WEIGHT : 1);
+  const weightSum = weights.reduce((a, b) => a + b, 0);
   const raw = {};
   allKeys.forEach(s => {
-    raw[s] = splits.reduce((sum, sp) => sum + (sp[s] || 0), 0) / splits.length;
+    raw[s] = splits.reduce((sum, sp, i) => sum + (sp[s] || 0) * weights[i], 0) / weightSum;
   });
+
+  const serviceCount = econs ? econs.filter(e => econFamily(e) === "Service").length : 0;
+  if (econs && econs.length > 0 && serviceCount < econs.length / 2) {
+    const removed = raw.Services * (1 - SERVICE_DAMPENING);
+    raw.Services -= removed;
+    const others = ["Extraction", "LightIndustry", "HeavyIndustry"];
+    const otherSum = others.reduce((sum, k) => sum + raw[k], 0);
+    others.forEach(k => {
+      raw[k] += otherSum > 0 ? removed * (raw[k] / otherSum) : removed / others.length;
+    });
+  }
 
   const rounded = {};
   let roundedSum = 0;
