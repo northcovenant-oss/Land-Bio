@@ -892,6 +892,20 @@
     // the sheet/form itself on submission). Bare values only, one per
     // line, no labels - this goes straight into sheet cells, so a label
     // would just be one more thing to strip out before pasting.
+    // Food/Energy Production strings (e.g. "+30 Food Surplus", "-15 Energy
+    // Dependent") start with a + or - sign, which Google Sheets reads as
+    // the start of an arithmetic expression rather than plain text once
+    // pasted into a cell. A leading straight apostrophe is Sheets' own
+    // escape for "treat this as text" - it's stripped from what's
+    // displayed, so it's safe to always include even when the value
+    // doesn't start with a sign.
+    const sheetSafeFood = snapshot.foodProduction ? "'" + snapshot.foodProduction : '';
+    const sheetSafeEnergy = snapshot.energyProduction ? "'" + snapshot.energyProduction : '';
+    const claimMapHexColor = (function(){
+      const el = document.getElementById('claimMapColorHex');
+      return el ? el.value.trim() : '';
+    })();
+
     const adminInfo = [
       nationName,
       document.getElementById('identityClassification').value.trim(),
@@ -899,8 +913,8 @@
       document.getElementById('identityGovernment').value.trim(),
       snapshot.economyType || '',
       snapshot.gdp || '',
-      snapshot.foodProduction || '',
-      snapshot.energyProduction || '',
+      sheetSafeFood,
+      sheetSafeEnergy,
       snapshot.population || '',
       f.specs[0],
       f.specs[1],
@@ -915,6 +929,7 @@
       f.expeditionary,
       f.paramilitary,
       snapshot.claimCode || '',
+      claimMapHexColor,
     ].join('\n');
 
     return card + '\n\n[/spoiler]\n\n[spoiler=for admin team usage]\n' + adminInfo + '\n[/spoiler]';

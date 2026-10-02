@@ -57,6 +57,8 @@
   const CLAIM_CODE_ROW_INDEX = 22;  // row 23 (0-indexed) - shifted from row 20 when
                                      // Classification/Capital/Government Type were
                                      // inserted into the FR admin-info block ahead of Claim Code
+  const NPC_ROW_INDEX = 26;         // row 27 (0-indexed) - "yes" in a column marks that
+                                     // nation as an NPC; appends " - NPC" to its name
   const FIRST_DATA_COLUMN = 1;      // column B (0-indexed) - column A assumed to be a row label
 
   // Minimal CSV row parser (handles quoted fields, escaped quotes) - no
@@ -136,14 +138,21 @@
           const rows = csvText.split(/\r?\n/).map(parseCsvLine);
           const nameRow = rows[NATION_ROW_INDEX] || [];
           const claimCodeRow = rows[CLAIM_CODE_ROW_INDEX] || [];
+          const npcRow = rows[NPC_ROW_INDEX] || [];
           const claims = [];
           const lastCol = Math.max(nameRow.length, claimCodeRow.length);
           for (let col = FIRST_DATA_COLUMN; col < lastCol; col++) {
-            const name = (nameRow[col] || "").trim();
+            let name = (nameRow[col] || "").trim();
             const claimCodeRaw = (claimCodeRow[col] || "").trim();
             if (!name || !claimCodeRaw) continue;
             const parsed = parseClaimCode(claimCodeRaw, byLabel);
             if (parsed.provinces.length === 0) continue;
+            // "yes" (any case) in this nation's column on row 27 marks it
+            // as an NPC nation - shown on the map by appending " - NPC"
+            // to the name, same column-position convention as every
+            // other row in this sheet.
+            const isNpc = (npcRow[col] || "").trim().toLowerCase() === "yes";
+            if (isNpc) name += " - NPC";
             claims.push({
               id: "col-" + col,
               name: name,
@@ -207,6 +216,7 @@
         console.log("[ClaimsStore debug] Row 22 (index 21):", rows[21]);
         console.log("[ClaimsStore debug] Row 23 (index 22) - expected claim codes:", rows[22]);
         console.log("[ClaimsStore debug] Row 24 (index 23):", rows[23]);
+        console.log("[ClaimsStore debug] Row 27 (index 26) - expected NPC yes/no flags:", rows[26]);
       })
       .catch(function (e) {
         console.warn("[ClaimsStore debug] Fetch/parse failed:", e.message);
@@ -217,6 +227,6 @@
     loadClaims: loadClaims,
     buildProvinceIndex: buildProvinceIndex,
     debugDump: debugDump,
-    VERSION: "2026-09-27-claim-code-row-23",
+    VERSION: "2026-10-02-npc-row-27",
   };
 })();
