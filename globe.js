@@ -842,6 +842,8 @@
   //   Row 24 Hex Color                 <- COLOR_ROW (Modern theme nation fill)
   //   Row 25 Factbook                  <- FACTBOOK_ROW
   //   Row 26 Application               <- APPLICATION_ROW
+  //   Row 27 NPC ("yes"/blank)         <- NPC_ROW (appends " - NPC" to the
+  //               nation's displayed name - see nationDisplayName() below)
   const LAND_BIO_SHEET_CSV_URL =
     'https://docs.google.com/spreadsheets/d/e/2PACX-1vR7W_8C-QWQO6AmHUYrvI4FdlyTMRV3qe65QIF-abGoH_YZRexNYMvCQQfLyJPWM_vQn_x26rVS_xmF/pub?gid=1336017158&single=true&output=csv';
 
@@ -860,6 +862,7 @@
     color: 23,
     factbook: 24,
     application: 25,
+    npc: 26,
   };
 
   function parseCsvLine(line){
@@ -920,6 +923,7 @@
             color: cell(LAND_BIO_ROWS.color, col),
             factbook: cell(LAND_BIO_ROWS.factbook, col),
             application: cell(LAND_BIO_ROWS.application, col),
+            npc: /^yes$/i.test(cell(LAND_BIO_ROWS.npc, col)),
           };
         }
         console.log('[Map] Loaded land bio data for ' + Object.keys(byNation).length + ' nation(s).');
@@ -939,6 +943,14 @@
     const div = document.createElement('div');
     div.textContent = str == null ? '' : String(str);
     return div.innerHTML;
+  }
+
+  // Appends " - NPC" to a nation's name wherever it's displayed (nation
+  // panel header, hover tooltip) when the Land Bio Data sheet's row 27
+  // ("NPC") is "yes" for that nation - see LAND_BIO_ROWS.npc above.
+  function nationDisplayName(nationName){
+    const sheet = landBioByName[nationName.toUpperCase()];
+    return nationName + (sheet && sheet.npc ? ' - NPC' : '');
   }
 
   function fieldRow(label, value){
@@ -981,7 +993,7 @@
 
     let html = '';
     if (sheet && sheet.classification) html += '<div class="nc-classification">' + escapeHtml(sheet.classification) + '</div>';
-    html += '<h3 class="nc-name">' + escapeHtml(nationName) + '</h3>';
+    html += '<h3 class="nc-name">' + escapeHtml(nationDisplayName(nationName)) + '</h3>';
     const subLines = [];
     if (capitalName) subLines.push('Capital: ' + escapeHtml(capitalName));
     if (areaLabel) subLines.push('Area: ' + escapeHtml(areaLabel));
@@ -1136,7 +1148,7 @@
       const sheet = landBioByName[props.nationName.toUpperCase()];
       const classification = sheet && sheet.classification;
       tooltip.innerHTML = (classification ? '<div class="sub">' + escapeHtml(classification) + '</div>' : '') +
-        escapeHtml(props.label);
+        escapeHtml(nationDisplayName(props.nationName));
     }
     tooltip.style.left = (e.clientX - rect.left) + 'px';
     tooltip.style.top = (e.clientY - rect.top) + 'px';
