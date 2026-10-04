@@ -314,7 +314,8 @@
     const rect = mapFrame.getBoundingClientRect();
     let sub;
     if(isTaken(p)){
-      sub = 'Claimed by ' + takenIndex[p.label.toUpperCase()].name;
+      const claim = takenIndex[p.label.toUpperCase()];
+      sub = 'Claimed by ' + claim.name + (claim.isNpc ? ' - NPC' : '');
     } else if(activeLayer.id === 'economic'){
       sub = p.econ;
     } else if(activeLayer.id === 'climate'){

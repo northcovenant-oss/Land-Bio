@@ -148,14 +148,20 @@
             const parsed = parseClaimCode(claimCodeRaw, byLabel);
             if (parsed.provinces.length === 0) continue;
             // "yes" (any case) in this nation's column on row 27 marks it
-            // as an NPC nation - shown on the map by appending " - NPC"
-            // to the name, same column-position convention as every
-            // other row in this sheet.
+            // as an NPC nation. Exposed as its own `isNpc` flag rather than
+            // baked into `name` itself - `name` is used as a lookup key
+            // against other by-nation-name data (the Land Bio Data sheet,
+            // in globe.js), and appending " - NPC" to it there breaks that
+            // lookup for every NPC nation, since the sheet's own nation-row
+            // cell never has the suffix. Anything that wants to *display*
+            // the NPC tag should append it itself (see map.js's showTooltip
+            // and globe.js's nationDisplayName()), not rely on `name`
+            // already carrying it.
             const isNpc = (npcRow[col] || "").trim().toLowerCase() === "yes";
-            if (isNpc) name += " - NPC";
             claims.push({
               id: "col-" + col,
               name: name,
+              isNpc: isNpc,
               provinces: parsed.provinces,
               capital: parsed.capital,
               dateAdded: null,
@@ -227,6 +233,6 @@
     loadClaims: loadClaims,
     buildProvinceIndex: buildProvinceIndex,
     debugDump: debugDump,
-    VERSION: "2026-10-02-npc-row-27",
+    VERSION: "2026-10-04-npc-flag-not-baked-into-name",
   };
 })();
