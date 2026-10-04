@@ -36,18 +36,9 @@
  * recomputing sector splits again (each computation re-rolls the dice).
  *
  * Also included below: ECON_SECTOR_CONFIG and computeSectorSplit(), which
- * define a Services / Manufacturing / Extraction breakdown for each
- * province based on its econ category.
- *
- * BAKED ROLLS: population, sector split, energy roll, food roll, GDP base,
- * and energy-resource type are no longer re-rolled on every "Generate"
- * click. Each province's values were rolled ONCE (using these same
- * formulas) and stored by label in landbio-rolls.js's
- * PROVINCE_LAND_BIO_ROLLS table, so the same claimed provinces always
- * produce the same land bio numbers for anyone who generates them. Each
- * roll point below checks that table first and only falls back to a live
- * random roll for a province whose label isn't in it (e.g. a brand-new
- * province added after the table was last generated).
+ * randomize a Services / Manufacturing / Extraction breakdown for each
+ * province based on its econ category, per-generation. See the comment
+ * above ECON_SECTOR_CONFIG for how to hard-code these instead later.
  */
 
 function generateLandBio(provinces) {
@@ -83,16 +74,6 @@ function generateLandBio(provinces) {
 }
 
 
-// Looks up a province's baked rolls by label in the PROVINCE_LAND_BIO_ROLLS
-// table (defined in landbio-rolls.js, loaded before this file). Returns
-// null if that table isn't loaded at all, or the province's label isn't in
-// it — both treated the same way by every call site below: fall back to a
-// live random roll.
-function bakedRollsFor(p) {
-  if (typeof PROVINCE_LAND_BIO_ROLLS === "undefined") return null;
-  return PROVINCE_LAND_BIO_ROLLS[p.label] || null;
-}
-
 // One shared pass over the claimed provinces — climates, econ categories,
 // and a randomized sector-percentage roll — that both output formats
 // below are built from.
@@ -120,10 +101,12 @@ function computeEconomics(provinces) {
   // breakdown so the underlying per-province math can actually be checked,
   // not just trusted from the aggregate.
   const perProvinceSectors = provinces
-    .map(p => ({ label: p.label, econ: p.econ, split: computeSectorSplit(p) }))
+    .map(p => ({ label: p.label, econ: p.econ, split: computeSectorSplit(p.econ) }))
     .filter(entry => entry.split);
   const sectorSplits = perProvinceSectors.map(entry => entry.split);
-  const sectorTotals = sectorSplits.length > 0 ? computeSectorTotals(sectorSplits) : null;
+  const sectorTotals = sectorSplits.length > 0
+    ? computeSectorTotals(sectorSplits, perProvinceSectors.map(entry => entry.econ))
+    : null;
   const classification = sectorTotals ? classifyEconomy(sectorTotals) : null;
 
   // Population: each province rolled independently (base 400,000-3 million x
@@ -457,9 +440,10 @@ const CLIMATE_DETAILS = {
 // Every province's econ category (e.g. "Service Focused", "Mineral Oriented")
 // implies a ranking of three underlying sectors — Services, Manufacturing,
 // and Extraction — and "Focused" vs "Oriented" controls how lopsided the
-// split is. computeSectorSplit() checks the baked PROVINCE_LAND_BIO_ROLLS
-// table first (see landbio-rolls.js) and only rolls live for a province
-// not found there.
+// split is. This is computed fresh each time a bio is generated; if you'd
+// rather lock these numbers in per-province instead of re-rolling them
+// every time, this is the place to swap random generation for a lookup
+// against a value stored in data.js.
 
 const ECON_SECTOR_CONFIG = {
   "Service Focused":      { order: ["Services", "Manufacturing", "Extraction"], magnitude: "focused" },
@@ -495,12 +479,10 @@ function randInt(min, max) {
 
 // ---- population ----
 //
-// Each province's population is baked (see landbio-rolls.js) from a base
-// (400,000-3 million) scaled by its econ category's and dominant climate's
-// modifiers below; a province not found in the baked table falls back to
-// rolling that base live. Computed once per province in computeEconomics
-// (same pass as the sector splits) so the prose text and the BBC code
-// always show the same total.
+// Each province gets a randomized base population (400,000-3 million), then
+// scaled by its econ category's and dominant climate's modifiers below.
+// Computed once per province in computeEconomics (same pass as the sector
+// splits) so the prose text and the BBC code always show the same total.
 const ECON_POPULATION_MODIFIER = {
   "Service Focused":      1.4,
   "Service Oriented":     1,
@@ -529,9 +511,6 @@ const CLIMATE_POPULATION_MODIFIER = {
 };
 
 function computeProvincePopulation(p) {
-  const baked = bakedRollsFor(p);
-  if (baked && baked.population != null) return baked.population;
-
   const base = randInt(400000, 3000000);
   const econMod = ECON_POPULATION_MODIFIER[p.econ] != null ? ECON_POPULATION_MODIFIER[p.econ] : 1;
   const climateName = p.climate ? p.climate.dominant : null;
@@ -545,11 +524,9 @@ function formatNumber(n) {
 
 // ---- energy production ----
 //
-// A single claim-wide modifier, not a per-province one. Every province's
-// base roll (from a range set by its econ category) is baked per-province
-// in landbio-rolls.js, falling back to a live roll only when a province
-// isn't in that table; the roll then gets scaled by a claim-size
-// multiplier - P2 for every category
+// A single claim-wide modifier, not a per-province one. Every province
+// rolls a random value from a range set by its econ category, then that
+// roll gets scaled by a claim-size multiplier - P2 for every category
 // except the two Energy ones, which use O2 instead (both P2 and O2 come
 // from the SAME claim-size bracket, just different columns of it). The
 // per-province results are summed, then rounded once at the end.
@@ -585,8 +562,7 @@ function computeEnergyProduction(provinces) {
   const perProvince = provinces.map(p => {
     const config = ENERGY_OUTPUT_CONFIG[p.econ];
     if (!config) return { label: p.label, econ: p.econ, roll: 0, value: 0 };
-    const baked = bakedRollsFor(p);
-    const roll = (baked && baked.energyRoll != null) ? baked.energyRoll : randInt(config.range[0], config.range[1]);
+    const roll = randInt(config.range[0], config.range[1]);
     const multiplier = config.uses === "O2" ? O2 : P2;
     const value = roll * multiplier;
     total += value;
@@ -614,8 +590,7 @@ function formatEnergyProduction(n) {
 
 // ---- food production ----
 //
-// Same claim-size-scaled-sum pattern as Energy Production above (per-
-// province base rolls baked in landbio-rolls.js, live fallback otherwise),
+// Same claim-size-scaled-random-sum pattern as Energy Production above,
 // but with two differences: Agriculture categories use the T2 multiplier
 // while every other category uses U2 (Energy Production split on Energy
 // vs everyone else; this one splits on Agriculture vs everyone else),
@@ -652,8 +627,7 @@ function computeFoodProduction(provinces) {
   const perProvince = provinces.map(p => {
     const config = FOOD_OUTPUT_CONFIG[p.econ];
     if (!config) return { label: p.label, econ: p.econ, roll: 0, value: 0 };
-    const baked = bakedRollsFor(p);
-    const roll = (baked && baked.foodRoll != null) ? baked.foodRoll : randInt(config.range[0], config.range[1]);
+    const roll = randInt(config.range[0], config.range[1]);
     const multiplier = config.uses === "T2" ? T2 : U2;
     const value = roll * multiplier;
     total += value;
@@ -681,9 +655,8 @@ function formatFoodProduction(n) {
 // Food Production, Energy Production, and Population values - not the
 // claim-wide totals.
 //   modifier = (food/20) + abs(energy/10) + (population/4,500,000)
-// Step 2: a base dollar figure drawn from a range set by the province's
-// econ category - baked per-province in landbio-rolls.js, with a live
-// random roll as the fallback for a province not in that table.
+// Step 2: a random base dollar figure drawn from a range set by the
+// province's econ category.
 // Step 3: GDP = base x modifier.
 const GDP_RANGE = {
   "Service Focused":      [7500000000,  40000000000],
@@ -717,8 +690,7 @@ function computeGDP(provinces, foodPerProvince, energyPerProvince, populationPer
     const population = populationPerProvince[i] ? populationPerProvince[i].population : 0;
     const modifier = computeGDPModifier(foodValue, energyValue, population);
     const range = GDP_RANGE[p.econ];
-    const baked = bakedRollsFor(p);
-    const base = (baked && baked.gdpBase != null) ? baked.gdpBase : (range ? randFloat(range[0], range[1]) : 0);
+    const base = range ? randFloat(range[0], range[1]) : 0;
     const gdpValue = Math.round(base * modifier);
     total += gdpValue;
     return { label: p.label, econ: p.econ, modifier, base: Math.round(base), gdp: gdpValue };
@@ -754,11 +726,7 @@ const EXTRACTION_CAP_PCT = 10;
 const EXTRACTION_CAPPED_ECONS = ["Service Focused", "Service Oriented"];
 const MIN_FEASIBLE_PRIMARY_FOR_CAP = Math.ceil((101 - EXTRACTION_CAP_PCT) / 2); // = 46 at a 10% cap
 
-function computeSectorSplit(p) {
-  const econName = p.econ;
-  const baked = bakedRollsFor(p);
-  if (baked && baked.sectorSplit) return baked.sectorSplit;
-
+function computeSectorSplit(econName) {
   const config = ECON_SECTOR_CONFIG[econName];
   if (!config) return null;
 
@@ -807,12 +775,77 @@ function computeSectorSplit(p) {
 // unsplit Light+Heavy total, kept around for the BBC code's ranked
 // Primary/Secondary/Tertiary columns, which mirror the forum template's
 // fixed 3-column structure rather than this 4-way breakdown).
-function computeSectorTotals(splits) {
+// ---- claim-level weighting ----
+//
+// Two adjustments applied when the per-province splits are combined into
+// the claim's overall breakdown:
+//
+//   1. Majority weighting. Province types are grouped into five families
+//      (Service, Production, Agriculture, Mineral, Energy - Focused and
+//      Oriented together). If MORE than half of the claim's provinces
+//      belong to one family (for Service: more than half Service FOCUSED,
+//      Oriented doesn't count), each of those provinces counts
+//      MAJORITY_FAMILY_WEIGHT times in the average instead of once, so a
+//      player who deliberately builds around one kind of land gets an
+//      economy that leans further that way.
+//
+//   2. Service dampening. If LESS than half of the claim's provinces are
+//      Service (Focused or Oriented), the combined Services share is
+//      multiplied by SERVICE_DAMPENING and the points taken away are
+//      shared out among Light Industry, Heavy Industry and Extraction in
+//      proportion to their size - so mixed claims lean towards goods and
+//      materials economies instead of defaulting to services.
+//
+// Set MAJORITY_FAMILY_WEIGHT to 1 or SERVICE_DAMPENING to 1 to switch
+// either adjustment off.
+const MAJORITY_FAMILY_WEIGHT = 1.5;
+const SERVICE_DAMPENING = 0.75;
+
+function econFamily(econName) {
+  return econName ? String(econName).split(" ")[0] : "";
+}
+
+// Which family (if any) makes up more than half of the claim. Service is
+// the exception: it only counts as the majority when Service FOCUSED
+// provinces alone are more than half (Service Oriented doesn't count
+// towards it), so pure service economies need a deliberately urban claim.
+function majorityFamily(econs) {
+  if (!econs || econs.length === 0) return null;
+  const counts = countBy(econs.filter(e => econFamily(e) !== "Service"), econFamily);
+  counts.Service = econs.filter(e => e === "Service Focused").length;
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return top && top[1] > econs.length / 2 ? top[0] : null;
+}
+
+// Whether a province gets the majority weight: every member of the majority
+// family, except that a Service majority only boosts Service Focused.
+function getsMajorityWeight(econName, majority) {
+  if (!majority) return false;
+  if (majority === "Service") return econName === "Service Focused";
+  return econFamily(econName) === majority;
+}
+
+function computeSectorTotals(splits, econs) {
   const allKeys = ["Services", "Extraction", "LightIndustry", "HeavyIndustry"];
+  const majority = majorityFamily(econs);
+  const weights = splits.map((sp, i) =>
+    econs && getsMajorityWeight(econs[i], majority) ? MAJORITY_FAMILY_WEIGHT : 1);
+  const weightSum = weights.reduce((a, b) => a + b, 0);
   const raw = {};
   allKeys.forEach(s => {
-    raw[s] = splits.reduce((sum, sp) => sum + (sp[s] || 0), 0) / splits.length;
+    raw[s] = splits.reduce((sum, sp, i) => sum + (sp[s] || 0) * weights[i], 0) / weightSum;
   });
+
+  const serviceCount = econs ? econs.filter(e => econFamily(e) === "Service").length : 0;
+  if (econs && econs.length > 0 && serviceCount < econs.length / 2) {
+    const removed = raw.Services * (1 - SERVICE_DAMPENING);
+    raw.Services -= removed;
+    const others = ["Extraction", "LightIndustry", "HeavyIndustry"];
+    const otherSum = others.reduce((sum, k) => sum + raw[k], 0);
+    others.forEach(k => {
+      raw[k] += otherSum > 0 ? removed * (raw[k] / otherSum) : removed / others.length;
+    });
+  }
 
   const rounded = {};
   let roundedSum = 0;
@@ -935,6 +968,9 @@ const SECTOR_EXPORT_LABEL = {
   Extraction: "Raw Materials",
 };
 const ALL_SECTOR_KEYS = ["Services", "LightIndustry", "HeavyIndustry", "Extraction"];
+// How many percentage points a goods sector may trail its partner and still
+// take the 1st World Exports slot in a combined economy (see buildWorldExports).
+const GOODS_LEAD_MARGIN = 5;
 
 // Returns [1st, 2nd, 3rd, 4th, 5th] export labels for a classification,
 // given the claim's aggregate sector totals.
@@ -971,7 +1007,17 @@ function buildWorldExports(classificationName, sectorTotals) {
 
   // ---- Combined economies (a pair of sectors > 50% together) ----
   const [a, b] = keys;
-  const first = val(a) >= val(b) ? a : b; // ties default to the first-listed sector
+  // 1st goes to the larger of the pair (ties -> first-listed sector), except
+  // that a goods sector (Consumer or Industrial Goods) paired with Services
+  // or Raw Materials leads whenever it is within GOODS_LEAD_MARGIN points of
+  // its partner. Manufacturing is split into Light + Heavy while the other
+  // two sectors are not, so each goods half would otherwise rarely lead.
+  const isGoods = k => k === "LightIndustry" || k === "HeavyIndustry";
+  let first = val(a) >= val(b) ? a : b;
+  if (isGoods(a) !== isGoods(b)) {
+    const goods = isGoods(a) ? a : b, other = goods === a ? b : a;
+    first = val(goods) >= val(other) - GOODS_LEAD_MARGIN ? goods : other;
+  }
   const second = first === a ? b : a;
   const firstLabel = label(first), secondLabel = label(second);
 
@@ -980,12 +1026,12 @@ function buildWorldExports(classificationName, sectorTotals) {
     ? `${firstLabel} or ${secondLabel}`
     : firstLabel;
 
-  // 4th looks at the OTHER two sectors only (the ones not part of this
-  // classification's defining pair) - "none -> repeat 2nd / one -> that
-  // one / both -> "X or Y"".
+  // 4th: the pair's secondary sector is always an option, plus either of
+  // the OTHER two sectors (not part of this classification's defining
+  // pair) that is over 20% - e.g. "Raw Materials or Services".
   const others = ALL_SECTOR_KEYS.filter(k => k !== a && k !== b);
   const above20 = others.filter(k => val(k) > 20);
-  const slot4 = above20.length === 0 ? secondLabel : above20.map(label).join(" or ");
+  const slot4 = [second].concat(above20).map(label).join(" or ");
 
   // 5th looks at ALL FOUR sectors, not just the "other two" - the pair
   // already used in slots 1-3 is still eligible here too, so a sector
@@ -1073,10 +1119,17 @@ function describeClimate(name) {
 
 // ---- Energy Resources (Coal / Natural Gas / Oil / Uranium) per province ----
 //
-// Each province's specific energy resource is baked (see landbio-rolls.js
-// and bakedRollsFor above) using its climate as weighting at bake time,
-// falling back to a live weighted roll only for a province not found in
-// that table.
+// Each province's specific energy resource is rolled per-generation, using
+// its climate as weighting - matches this project's existing pattern where
+// climate is a fixed province property but economy/food/energy/population
+// OUTPUTS are randomized on each "Generate" click, not baked in.
+//
+// TEMPORARY, PER USER'S OWN NOTE: this is meant to eventually be replaced
+// once the province data itself is finalized on the map - at that point,
+// each province's resource type should be rolled ONCE and hardcoded into
+// data.js (the same way climate.dominant already is), rather than
+// re-rolled every time a bio is generated. Flagging this in code as well
+// as here so it isn't lost.
 //
 // Percentages are given by the source table; the four keys per row always
 // sum to 100. Two rows in the source table (Tundra, Humid Sub-tropical)
@@ -1126,22 +1179,10 @@ function rollProvinceResources(provinces) {
     // shouldn't come up as sitting on Coal/Oil/etc. just because its
     // climate would statistically favor it.
     if (p.econ !== "Energy Focused" && p.econ !== "Energy Oriented") return;
-
-    // A province found in the baked table is authoritative even when its
-    // baked resource is null (no climate match at bake time) — only a
-    // province NOT in the table (table missing, or added since) falls
-    // back to a live roll.
-    const baked = bakedRollsFor(p);
-    let resource;
-    if (baked) {
-      resource = baked.resource;
-    } else {
-      const climate = p.climate && p.climate.dominant;
-      const weights = climate && RESOURCE_WEIGHTS_BY_CLIMATE[climate];
-      if (!weights) return;
-      resource = weightedPick(weights);
-    }
-    if (!resource) return;
+    const climate = p.climate && p.climate.dominant;
+    const weights = climate && RESOURCE_WEIGHTS_BY_CLIMATE[climate];
+    if (!weights) return;
+    const resource = weightedPick(weights);
     if (!byResource[resource]) byResource[resource] = [];
     byResource[resource].push(p.label);
   });
