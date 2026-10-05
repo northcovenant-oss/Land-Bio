@@ -1215,6 +1215,27 @@
     return null;
   }
 
+  // Random default highlight color: vivid and mid-lightness, so it never
+  // lands on grey, white or black (saturation >= 60%, lightness 42-62%),
+  // and with the hue kept out of the blue/cyan band (170-250 degrees) so it
+  // can't blend into the ocean (Modern #3f8fd1 is ~208 degrees; Parchment's
+  // ocean ~200 degrees).
+  function randomClaimMapColor(){
+    const BLOCKED_FROM = 170, BLOCKED_TO = 250;
+    const span = 360 - (BLOCKED_TO - BLOCKED_FROM);
+    let h = Math.random() * span;
+    if(h >= BLOCKED_FROM) h += (BLOCKED_TO - BLOCKED_FROM);
+    const sat = (60 + Math.random() * 35) / 100;
+    const lig = (42 + Math.random() * 20) / 100;
+    const k = function(n){ return (n + h / 30) % 12; };
+    const a = sat * Math.min(lig, 1 - lig);
+    const f = function(n){
+      const v = lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+      return Math.round(v * 255).toString(16).padStart(2, '0');
+    };
+    return '#' + f(0) + f(8) + f(4);
+  }
+
   function initClaimMapColorPicker(row){
     const colorPicker = document.getElementById('claimMapColorPicker');
     const hexInput = document.getElementById('claimMapColorHex');
@@ -1223,12 +1244,13 @@
     const claimFillEls = row.querySelectorAll('.claim-fill');
     if(claimFillEls.length === 0) return; // nothing to recolor (e.g. no capital, no claimed provinces somehow)
 
-    // Starting color is whatever map.js already baked in (the theme's
-    // gold), not a hardcoded default, so the picker reflects the map
-    // exactly as shown before anyone touches it.
-    const currentFill = normalizeHexColor(claimFillEls[0].getAttribute('fill')) || '#e0a83e';
+    // Starting color is randomized on every load so applicants who never
+    // touch the picker don't all end up with the same highlight. See
+    // randomClaimMapColor() for what it avoids.
+    const currentFill = randomClaimMapColor();
     colorPicker.value = currentFill;
     hexInput.value = currentFill;
+    claimFillEls.forEach(function(elm){ elm.setAttribute('fill', currentFill); });
 
     function applyColor(hex){
       claimFillEls.forEach(function(elm){ elm.setAttribute('fill', hex); });
