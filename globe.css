@@ -100,6 +100,8 @@ body.theme-dark #globeSvg .globe-sphere{
 path.nation-province{
   cursor: pointer;
   stroke: none;
+  stroke-linejoin: round; /* no miter spikes at narrow fjord tips (e.g. C102) */
+  stroke-linecap: round;
   transition: filter 0.15s ease, opacity 0.15s ease;
 }
 path.nation-province:hover{ filter: brightness(1.15); }
@@ -168,7 +170,7 @@ body.theme-dark path.nation-province[data-continent]{
  * redeploy of this file; only the width and the picked-state brightening
  * live in CSS.
  */
-path.relief-claim{ stroke-width: 2.2; pointer-events: none; transition: filter 0.15s ease; }
+path.relief-claim{ stroke-linejoin: round; stroke-linecap: round; stroke-width: 2.2; pointer-events: none; transition: filter 0.15s ease; }
 path.relief-claim.picked{ filter: brightness(1.35); stroke-width: 3.4; }
 
 /*
