@@ -893,12 +893,11 @@
     // line, no labels - this goes straight into sheet cells, so a label
     // would just be one more thing to strip out before pasting.
     //
-    // Food/Energy Production are wrapped in literal double quotes before
-    // being pasted: both start with a leading "-" (e.g. "-75: Minor Food
-    // Importer"), which Sheets tries to read as the start of a formula/
-    // negative number on paste instead of as plain text. A value that
-    // instead starts with a quote character isn't a formula trigger, so
-    // it pastes in as-is. GDP/Population don't need this - they start
+    // Food/Energy Production get a leading apostrophe before being pasted:
+    // both start with a "-" (e.g. "-75: Minor Food Importer"), which Sheets
+    // tries to read as the start of a formula/negative number on paste. A
+    // leading ' is Sheets' own "treat as plain text" marker - it isn't
+    // shown in the cell, so the value lands as-is. GDP/Population don't need this - they start
     // with "$"/a digit, neither of which Sheets treats as a formula lead.
     const claimMapHexColor = (function(){
       const el = document.getElementById('claimMapColorHex');
@@ -912,8 +911,8 @@
       document.getElementById('identityGovernment').value.trim(),
       snapshot.economyType || '',
       snapshot.gdp || '',
-      snapshot.foodProduction ? '"' + snapshot.foodProduction + '"' : '',
-      snapshot.energyProduction ? '"' + snapshot.energyProduction + '"' : '',
+      snapshot.foodProduction ? "'" + snapshot.foodProduction : '',
+      snapshot.energyProduction ? "'" + snapshot.energyProduction : '',
       snapshot.population || '',
       f.specs[0],
       f.specs[1],
@@ -1010,14 +1009,18 @@
       .replace('{{EXPEDITIONARY}}', f.expeditionary)
       .replace('{{PARAMILITARY}}', f.paramilitary);
 
-    // The Citizen Card used to be its own separate copy button - it's now
-    // folded into the bottom of the Full Application (wrapped in its own
-    // spoiler) since players send the whole Application to Rylet as one
-    // piece. buildCitizenCard() is unchanged and still includes its own
-    // nested admin-info spoiler - that data is exactly what Rylet needs
-    // to process the application, so it travels along with it.
-    const citizenCard = buildCitizenCard();
-    return application + '\n\n[spoiler=Citizen Card]\n' + citizenCard + '\n[/spoiler]';
+    // The Citizen Card and admin info are no longer part of the Full
+    // Application - they have their own "For Admin" copy button (see
+    // buildForAdmin()), since players post the application in their
+    // Dispatches and send the admin material to Rylet separately.
+    return application;
+  }
+
+  // Everything Rylet needs besides the posted application: the Citizen
+  // Card plus the for-admin-team-usage spoiler (buildCitizenCard() already
+  // returns both, the latter nested after the card).
+  function buildForAdmin(){
+    return buildCitizenCard();
   }
 
   // Same copy-to-clipboard pattern used on the bio page (map.js's
@@ -1049,6 +1052,11 @@
     document.getElementById('fullApplicationSource').value = text;
     return text;
   }, 'Full Application');
+  bindCopyButton('copyForAdminBtn', function(){
+    const text = buildForAdmin();
+    document.getElementById('fullApplicationSource').value = text;
+    return text;
+  }, 'For Admin');
 
   // ---- Step navigation ----
   const TOTAL_STEPS = 5;
