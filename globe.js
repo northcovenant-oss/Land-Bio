@@ -521,7 +521,7 @@
   // surrounded by this nation's territory) or which hole belongs to which
   // disjoint piece of the nation's territory - see groupRingsForGlobe()
   // for why the globe needs that and the flat map doesn't.
-  function dissolveRings(ringsList, precision){
+  function dissolveRings(ringsList, precision, bridgeTol){
     function ptKey(pt){ return pt[0].toFixed(precision) + ',' + pt[1].toFixed(precision); }
     function edgeKey(ka, kb){ return ka < kb ? ka + '|' + kb : kb + '|' + ka; }
 
@@ -552,6 +552,41 @@
         (adjacency[ka] = adjacency[ka] || []).push(kb);
       }
     });
+
+    // Heal tiny gaps: where two neighboring provinces' shared border is
+    // off by a hair (a vertex a pixel or so apart, or a missing vertex),
+    // the outer boundary has a dangling end that never meets its next
+    // chain, and the whole chain - often the entire continent outline -
+    // would be dropped as "unclosed". Join each dangling end to the
+    // nearest dangling start within bridgeTol, which closes the ring with
+    // a sub-pixel-scale straight segment.
+    if (bridgeTol > 0){
+      const indeg = {};
+      Object.keys(adjacency).forEach(function(k){
+        adjacency[k].forEach(function(n){ indeg[n] = (indeg[n] || 0) + 1; });
+      });
+      const starts = [], ends = [];
+      Object.keys(pointByKey).forEach(function(k){
+        const out = adjacency[k] ? adjacency[k].length : 0, inn = indeg[k] || 0;
+        for (let i = 0; i < out - inn; i++) starts.push(k);
+        for (let i = 0; i < inn - out; i++) ends.push(k);
+      });
+      const usedStart = {};
+      ends.forEach(function(ek){
+        const e = pointByKey[ek];
+        let best = null, bestD = bridgeTol;
+        starts.forEach(function(sk, si){
+          if (usedStart[si]) return;
+          const s = pointByKey[sk];
+          const d = Math.hypot(s[0] - e[0], s[1] - e[1]);
+          if (d <= bestD){ bestD = d; best = si; }
+        });
+        if (best != null){
+          usedStart[best] = true;
+          (adjacency[ek] = adjacency[ek] || []).push(starts[best]);
+        }
+      });
+    }
 
     const edgeUsed = {};
     const outRings = [];
@@ -695,7 +730,7 @@
     try {
       const pixelRings = [];
       provinces.forEach(function(p){ p.pixelRings.forEach(function(r){ pixelRings.push(r); }); });
-      const mergedPixel = dissolveRings(pixelRings, 2);
+      const mergedPixel = dissolveRings(pixelRings, 2, 1.5);
       // Sanity check: a dissolve whose border vertices don't line up
       // exactly (e.g. a continent whose provinces were cut with slightly
       // mismatched shared edges) silently drops the chains it can't close,
@@ -720,7 +755,7 @@
       // the much-shorter merged result afterward avoids that entirely.
       const globeRingsFull = [];
       provinces.forEach(function(p){ p.rings.forEach(function(r){ globeRingsFull.push(r); }); });
-      const mergedGlobe = dissolveRings(globeRingsFull, 7);
+      const mergedGlobe = dissolveRings(globeRingsFull, 7, 0.3);
       const simplified = mergedGlobe
         .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
         .filter(isUsableRing);
