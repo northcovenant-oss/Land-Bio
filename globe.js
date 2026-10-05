@@ -678,6 +678,17 @@
   // its flat SVG path and globe GeoJSON geometry. Returns {flatPath,
   // globeGeometry}, either of which can be null if that group had no
   // usable geometry at all.
+  // True if the dissolved rings still cover (roughly) the same net area as
+  // the source rings they were built from. Net signed area on both sides, so
+  // holes/lakes subtract consistently; 0.8 leaves room for the small,
+  // legitimate loss from the odd unclosable border sliver.
+  function dissolveKeptEnoughArea(mergedRings, sourceRings){
+    function net(list){ let sum = 0; list.forEach(function(r){ sum += ringSignedArea(r); }); return Math.abs(sum); }
+    const expected = net(sourceRings);
+    if (!(expected > 0)) return true;
+    return net(mergedRings) / expected >= 0.8;
+  }
+
   function mergeProvinceGeometry(provinces, groupLabel){
     let flatPath = null, globeGeometry = null;
 
@@ -685,7 +696,15 @@
       const pixelRings = [];
       provinces.forEach(function(p){ p.pixelRings.forEach(function(r){ pixelRings.push(r); }); });
       const mergedPixel = dissolveRings(pixelRings, 2);
-      if (mergedPixel.length) flatPath = multiPolygonToSvgPath(mergedPixel);
+      // Sanity check: a dissolve whose border vertices don't line up
+      // exactly (e.g. a continent whose provinces were cut with slightly
+      // mismatched shared edges) silently drops the chains it can't close,
+      // which can leave only a sliver of the real land - confirmed on the
+      // Central continent, which kept ~6% of its area. If the merged shape
+      // lost a large share of the provinces' own combined area, draw the
+      // provinces' own rings as-is instead (seam-prone, but never missing).
+      if (mergedPixel.length && dissolveKeptEnoughArea(mergedPixel, pixelRings)) flatPath = multiPolygonToSvgPath(mergedPixel);
+      else if (pixelRings.length) flatPath = multiPolygonToSvgPath(pixelRings);
     } catch (e){
       console.warn('[Map] Could not merge flat-map geometry for ' + groupLabel + ':', e.message);
     }
@@ -705,8 +724,15 @@
       const simplified = mergedGlobe
         .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
         .filter(isUsableRing);
-      if (simplified.length){
+      if (simplified.length && dissolveKeptEnoughArea(mergedGlobe, globeRingsFull)){
         const polygons = groupRingsForGlobe(simplified, GLOBE_EXTERIOR_SIGN);
+        if (polygons.length) globeGeometry = { type: 'MultiPolygon', coordinates: polygons };
+      } else {
+        // Same fallback as the flat map above: the dissolve lost too much
+        // area, so use each province's own (already winding-fixed,
+        // simplified) ring as its own polygon.
+        const polygons = [];
+        provinces.forEach(function(p){ (p.globeRings || []).forEach(function(r){ polygons.push([r]); }); });
         if (polygons.length) globeGeometry = { type: 'MultiPolygon', coordinates: polygons };
       }
     } catch (e){
