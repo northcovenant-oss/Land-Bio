@@ -286,6 +286,14 @@
   // ~14.5k (avg ~12/province, worst case ~140) while keeping province
   // shapes clearly recognizable at any globe zoom level.
   const GLOBE_SIMPLIFY_TOLERANCE = 0.2;
+  // Merged (nation / unclaimed / continent) outlines are simplified much
+  // more gently. Each of those layers is simplified on its own, so at the
+  // coarse per-province tolerance a shared coastline gets cut differently
+  // in each layer - a fjordy province like C102 (228 points -> 15) then
+  // pokes out past, or falls short of, the continent shape underneath and
+  // leaves white slivers. At this tolerance the layers agree to well under
+  // a pixel.
+  const GLOBE_MERGED_SIMPLIFY_TOLERANCE = 0.02;
 
   // Base geometry, independent of who's claimed what - built once.
   // "rings" holds one ring per subpath in the source 'd' (almost always
@@ -757,7 +765,7 @@
       provinces.forEach(function(p){ p.rings.forEach(function(r){ globeRingsFull.push(r); }); });
       const mergedGlobe = dissolveRings(globeRingsFull, 7, 0.3);
       const simplified = mergedGlobe
-        .map(function(ring){ return simplifyRing(ring, GLOBE_SIMPLIFY_TOLERANCE); })
+        .map(function(ring){ return simplifyRing(ring, GLOBE_MERGED_SIMPLIFY_TOLERANCE); })
         .filter(isUsableRing);
       if (simplified.length && dissolveKeptEnoughArea(mergedGlobe, globeRingsFull)){
         const polygons = groupRingsForGlobe(simplified, GLOBE_EXTERIOR_SIGN);
