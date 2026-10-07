@@ -864,8 +864,32 @@
     return { specs, priorityText, stanceText, army, navy, airForce, expeditionary, paramilitary, nationName };
   }
 
+  // The FINAL figures after every player choice - Step 3's specialization
+  // adjustments and Step 4's population change - for everything Step 5
+  // outputs (Citizen Card, admin info, Full Application). Uses the same
+  // computeCurrentAdjustments() as the snapshot box at the top of the page,
+  // so the posted numbers always match what the player saw. Falls back to
+  // the bio's original figure wherever a value couldn't be adjusted.
+  // Food keeps the land bio's own wording ("+30: Minor Food Exporter").
+  function formatFoodForOutput(n){
+    const r = Math.round(n);
+    const cls = r < -300 ? 'Critical Food Importer' : r < -200 ? 'Major Food Importer'
+      : r < 0 ? 'Minor Food Importer' : r < 200 ? 'Minor Food Exporter' : 'Major Food Exporter';
+    return (r >= 0 ? '+' : '') + r + ': ' + cls;
+  }
+  function finalFigures(){
+    const t = computeCurrentAdjustments();
+    return {
+      population: t.population ? formatPopulationValue(t.population.adjustedNumber) : (snapshot.population || ''),
+      gdp: t.gdp && t.gdp.parsed ? t.gdp.adjustedGDPText : (snapshot.gdp || ''),
+      food: t.food ? formatFoodForOutput(t.food.adjustedTotal) : (snapshot.foodProduction || ''),
+      energy: t.energy ? formatEnergyValue(t.energy.adjustedTotal) : (snapshot.energyProduction || ''),
+    };
+  }
+
   function buildCitizenCard(){
     const f = gatherCommonFields();
+    const fig = finalFigures();
     const nationName = f.nationName;
 
     const card = CITIZEN_CARD_TEMPLATE
@@ -873,10 +897,10 @@
       .replace('{{JOIN_DATE}}', todayJoinDate())
       .replace('{{CLASSIFICATION}}', document.getElementById('identityClassification').value.trim())
       .replace('{{CAPITAL}}', document.getElementById('identityCapital').value.trim())
-      .replace('{{POPULATION}}', snapshot.population || '')
+      .replace('{{POPULATION}}', fig.population)
       .replace('{{GOVERNMENT_TYPE}}', document.getElementById('identityGovernment').value.trim())
       .replace('{{ECONOMY_TYPE}}', snapshot.economyType || '')
-      .replace('{{GDP}}', snapshot.gdp || '')
+      .replace('{{GDP}}', fig.gdp)
       .replace('{{SPEC1}}', f.specs[0]).replace('{{SPEC2}}', f.specs[1]).replace('{{SPEC3}}', f.specs[2])
       .replace('{{SPEC4}}', f.specs[3]).replace('{{SPEC5}}', f.specs[4])
       .replace('{{PRIORITY}}', f.priorityText)
@@ -910,10 +934,10 @@
       document.getElementById('identityCapital').value.trim(),
       document.getElementById('identityGovernment').value.trim(),
       snapshot.economyType || '',
-      snapshot.gdp || '',
-      snapshot.foodProduction ? "'" + snapshot.foodProduction : '',
-      snapshot.energyProduction ? "'" + snapshot.energyProduction : '',
-      snapshot.population || '',
+      fig.gdp,
+      fig.food ? "'" + fig.food : '',
+      fig.energy ? "'" + fig.energy : '',
+      fig.population,
       f.specs[0],
       f.specs[1],
       f.specs[2],
@@ -992,15 +1016,16 @@
 
   function buildFullApplication(){
     const f = gatherCommonFields();
+    const fig = finalFigures();
     const application = FULL_APPLICATION_TEMPLATE
       .replace('{{DISPLAY_NAME}}', f.nationName || 'Nation')
       .replace('{{CAPITAL}}', document.getElementById('identityCapital').value.trim())
-      .replace('{{POPULATION}}', snapshot.population || '')
+      .replace('{{POPULATION}}', fig.population)
       .replace('{{ECONOMY_TYPE}}', snapshot.economyType || '')
       .replace('{{SPEC1}}', f.specs[0]).replace('{{SPEC2}}', f.specs[1]).replace('{{SPEC3}}', f.specs[2])
       .replace('{{SPEC4}}', f.specs[3]).replace('{{SPEC5}}', f.specs[4])
-      .replace('{{FOOD_PRODUCTION}}', snapshot.foodProduction || '')
-      .replace('{{ENERGY_PRODUCTION}}', snapshot.energyProduction || '')
+      .replace('{{FOOD_PRODUCTION}}', fig.food)
+      .replace('{{ENERGY_PRODUCTION}}', fig.energy)
       .replace('{{MIL_DOCTRINE}}', f.priorityText)
       .replace('{{NATIONAL_ATTITUDE}}', f.stanceText)
       .replace('{{ARMY}}', f.army)
