@@ -51,7 +51,63 @@
     return Math.round(n).toLocaleString('en-US');
   }
 
-  // ---- Step 1: one slot per World Exports rank, tied to that rank's sector ----
+  // ---- Step 1: Land Use ----
+  //
+  // Four tradeoff sliders. Each runs 0-100 between two competing uses
+  // (50 = an even split). The values are kept in landUse for later, but
+  // nothing reads them yet - they don't feed the specialization, production
+  // or application output.
+  //
+  // Hiding irrelevant sliders: each slider has a relevant(snapshot)
+  // function saying whether it applies to this claim (e.g. no point asking
+  // Herding vs Forestry if the claim has no forest or grazing land). The
+  // switch below is OFF on purpose until real data feeds into the sliders -
+  // while it's off, every slider always shows, whatever relevant() returns.
+  // To turn it on later: set LAND_USE_HIDE_IRRELEVANT to true and fill in
+  // each relevant() with its real test (they all return true for now).
+  const LAND_USE_HIDE_IRRELEVANT = false;
+  const LAND_USE_SLIDERS = [
+    { id: 'cropland-forestry',  left: 'Cropland', right: 'Forestry',   relevant: function(snap){ return true; } },
+    { id: 'cropland-cashcrops', left: 'Cropland', right: 'Cash Crops', relevant: function(snap){ return true; } },
+    { id: 'herding-cropland',   left: 'Herding',  right: 'Cropland',   relevant: function(snap){ return true; } },
+    { id: 'herding-forestry',   left: 'Herding',  right: 'Forestry',   relevant: function(snap){ return true; } },
+  ];
+  function isLandUseSliderVisible(def){
+    if(!LAND_USE_HIDE_IRRELEVANT) return true;
+    try { return !!def.relevant(snapshot); } catch(e){ return true; }
+  }
+  const landUse = {};
+  (function renderLandUseSliders(){
+    const host = document.getElementById('landUseSliders');
+    if(!host) return;
+    LAND_USE_SLIDERS.forEach(function(def){
+      landUse[def.id] = 50;
+      const row = document.createElement('div');
+      row.className = 'land-use-row';
+      row.hidden = !isLandUseSliderVisible(def);
+      row.innerHTML =
+        '<div class="land-use-title">' + def.left + ' vs ' + def.right + '</div>' +
+        '<div class="land-use-control">' +
+          '<span class="land-use-end">' + def.left + '</span>' +
+          '<input type="range" min="0" max="100" step="1" value="50" aria-label="' + def.left + ' vs ' + def.right + '">' +
+          '<span class="land-use-end">' + def.right + '</span>' +
+        '</div>' +
+        '<div class="land-use-readout"></div>';
+      const input = row.querySelector('input');
+      const readout = row.querySelector('.land-use-readout');
+      function update(){
+        const v = parseInt(input.value, 10);
+        landUse[def.id] = v;
+        readout.textContent = (100 - v) + '% ' + def.left + ' \u00b7 ' + v + '% ' + def.right;
+        input.style.setProperty('--fill', v + '%');
+      }
+      input.addEventListener('input', update);
+      update();
+      host.appendChild(row);
+    });
+  })();
+
+  // ---- Step 2: one slot per World Exports rank, tied to that rank's sector ----
   // snapshot.worldExports is the bio's actual 1st-5th ranked export labels
   // (e.g. "Services", "Raw Materials", "Services or Raw Materials", "Any").
   // Each slot only offers specializations from the pool(s) that label maps
@@ -1084,7 +1140,7 @@
   }, 'For Admin');
 
   // ---- Step navigation ----
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = 6;
   let currentStep = 1;
   const backBtn = document.getElementById('backBtn');
   const nextBtn = document.getElementById('nextBtn');
@@ -1096,8 +1152,8 @@
 
   function updateNextButtonState(){
     let enabled = true;
-    if(currentStep === 1) enabled = VISIBLE_SLOTS.every(function(slot){ return !!chosenSpecs[slot.storageIndex]; });
-    if(currentStep === 2){
+    if(currentStep === 2) enabled = VISIBLE_SLOTS.every(function(slot){ return !!chosenSpecs[slot.storageIndex]; });
+    if(currentStep === 3){
       // Doctrine (both Priority and Stance) always required. Focus points
       // must be fully allocated too, UNLESS Pacifist (budget is 0, so
       // there's nothing to allocate - Focus is effectively skipped).
@@ -1106,7 +1162,7 @@
       const focusComplete = chosenStance === 'Pacifist' || pointsSpent() === budget;
       enabled = doctrineChosen && focusComplete;
     }
-    // Step 5 (National Identity) is never gated - these are flavor fields.
+    // Steps 1 (Land Use) and 6 (National Identity) are never gated - these are flavor fields.
     nextBtn.disabled = !enabled;
     const standardSetupNextBtn = document.getElementById('standardSetupNextBtn');
     if(standardSetupNextBtn) standardSetupNextBtn.disabled = !enabled;
@@ -1116,7 +1172,7 @@
 
   function showStep(step){
     // hide all panels
-    [1,2,3,4,5].forEach(function(s){ panelFor(s).hidden = true; });
+    [1,2,3,4,5,6].forEach(function(s){ panelFor(s).hidden = true; });
     panelFor(step).hidden = false;
 
     backBtn.hidden = (step === 1);
@@ -1132,9 +1188,9 @@
       dot.classList.toggle('done', dotStep < step);
     });
 
-    if(step === 3){ renderChosenSummary(); renderEnergyAdjustment(); renderFoodAdjustment(); }
-    if(step === 4) renderPopulationAdjustment();
-    if(step === 5){ renderClaimMap(); renderPotentialImports(); }
+    if(step === 4){ renderChosenSummary(); renderEnergyAdjustment(); renderFoodAdjustment(); }
+    if(step === 5) renderPopulationAdjustment();
+    if(step === 6){ renderClaimMap(); renderPotentialImports(); }
     updateNextButtonState();
   }
 

@@ -43,20 +43,30 @@
 
     <!-- Step progress indicator -->
     <div class="spec-steps" id="stepIndicator">
-      <div class="step-dot active" data-step="1"><span class="step-num">1</span><span class="step-label">Specializations</span></div>
+      <div class="step-dot active" data-step="1"><span class="step-num">1</span><span class="step-label">Land Use</span></div>
       <div class="step-connector"></div>
-      <div class="step-dot" data-step="2"><span class="step-num">2</span><span class="step-label">Military</span></div>
+      <div class="step-dot" data-step="2"><span class="step-num">2</span><span class="step-label">Specializations</span></div>
       <div class="step-connector"></div>
-      <div class="step-dot" data-step="3"><span class="step-num">3</span><span class="step-label">Production</span></div>
+      <div class="step-dot" data-step="3"><span class="step-num">3</span><span class="step-label">Military</span></div>
       <div class="step-connector"></div>
-      <div class="step-dot" data-step="4"><span class="step-num">4</span><span class="step-label">Population</span></div>
+      <div class="step-dot" data-step="4"><span class="step-num">4</span><span class="step-label">Production</span></div>
       <div class="step-connector"></div>
-      <div class="step-dot" data-step="5"><span class="step-num">5</span><span class="step-label">Identity</span></div>
+      <div class="step-dot" data-step="5"><span class="step-num">5</span><span class="step-label">Population</span></div>
+      <div class="step-connector"></div>
+      <div class="step-dot" data-step="6"><span class="step-num">6</span><span class="step-label">Identity</span></div>
     </div>
 
-    <!-- ===== Step 1: Choose 5 Specializations ===== -->
+    <!-- ===== Step 1: Land Use ===== -->
     <div class="spec-card step-panel" id="step1" data-step-panel="1">
-      <h2>Step 1 &middot; Choose Your Specializations</h2>
+      <h2>Step 1 &middot; Land Use</h2>
+      <p class="step-intro">Decide how your nation balances its land between competing uses. Slide toward the side
+        you want to favor; the middle is an even split.</p>
+      <div id="landUseSliders"><!-- populated by specialization.js --></div>
+    </div>
+
+    <!-- ===== Step 2: Choose 5 Specializations ===== -->
+    <div class="spec-card step-panel" id="step2" data-step-panel="2" hidden>
+      <h2>Step 2 &middot; Choose Your Specializations</h2>
       <p class="step-intro">Your five specializations are tied to your land bio's World Exports ranking (Economy
         Type: <strong id="step1EconomyType">&mdash;</strong>). For each rank, choose the specific specialty your
         nation is known for within that category.</p>
@@ -68,9 +78,9 @@
       <div id="specSlots"><!-- populated by specialization.js, one section per export rank --></div>
     </div>
 
-    <!-- ===== Step 2: Military Doctrine + Focus ===== -->
-    <div class="spec-card step-panel" id="step2" data-step-panel="2" hidden>
-      <h2>Step 2 &middot; Military</h2>
+    <!-- ===== Step 3: Military Doctrine + Focus ===== -->
+    <div class="spec-card step-panel" id="step3" data-step-panel="3" hidden>
+      <h2>Step 3 &middot; Military</h2>
       <div class="quick-fill-row">
         <span class="quick-fill-note">Not interested? Click here to generate</span>
         <button type="button" class="btn-secondary" id="standardSetupBtn">Use Standard Setup</button>
@@ -95,9 +105,9 @@
       <div id="militaryFocusBranches"><!-- populated by specialization.js --></div>
     </div>
 
-    <!-- ===== Step 3: Adjust Energy/Agricultural Production ===== -->
-    <div class="spec-card step-panel" id="step3" data-step-panel="3" hidden>
-      <h2>Step 3 &middot; Adjust Energy &amp; Agricultural Production</h2>
+    <!-- ===== Step 4: Adjust Energy/Agricultural Production ===== -->
+    <div class="spec-card step-panel" id="step4" data-step-panel="4" hidden>
+      <h2>Step 4 &middot; Adjust Energy &amp; Agricultural Production</h2>
       <p class="step-intro">Your chosen specializations shift these figures automatically.</p>
       <div class="spec-chosen-summary" id="chosenSummary"><!-- populated by specialization.js --></div>
       <div class="adjust-row">
@@ -122,9 +132,9 @@
       </div>
     </div>
 
-    <!-- ===== Step 4: Adjust Population ===== -->
-    <div class="spec-card step-panel" id="step4" data-step-panel="4" hidden>
-      <h2>Step 4 &middot; Adjust Population</h2>
+    <!-- ===== Step 5: Adjust Population ===== -->
+    <div class="spec-card step-panel" id="step5" data-step-panel="5" hidden>
+      <h2>Step 5 &middot; Adjust Population</h2>
       <p class="step-intro">Choosing a population level away from your stable population shows the resulting
         headcount below, along with how it affects GDP, Food Production, and Energy Production.</p>
       <div class="pop-adjust-row">
@@ -194,9 +204,9 @@
       </div>
     </div>
 
-    <!-- ===== Step 5: National Identity + Citizen Card BBC ===== -->
-    <div class="spec-card step-panel" id="step5" data-step-panel="5" hidden>
-      <h2>Step 5 &middot; National Identity</h2>
+    <!-- ===== Step 6: National Identity + Citizen Card BBC ===== -->
+    <div class="spec-card step-panel" id="step6" data-step-panel="6" hidden>
+      <h2>Step 6 &middot; National Identity</h2>
       <p class="step-intro">A few finishing details, then generate your Citizen Application card - fills in
         automatically from everything chosen so far.</p>
 

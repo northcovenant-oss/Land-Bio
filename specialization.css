@@ -667,3 +667,49 @@ body.spec-page {
   box-sizing: border-box;
   resize: vertical;
 }
+
+/* ---- Step 1: Land Use sliders ---- */
+.land-use-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.land-use-row:first-child { border-top: none; }
+.land-use-title {
+  font-family: var(--font-display);
+  color: var(--ink);
+  font-size: 16px;
+}
+.land-use-control {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) 1fr minmax(70px, auto);
+  align-items: center;
+  gap: 12px;
+}
+.land-use-end {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.land-use-end:last-child { text-align: right; }
+.land-use-control input[type=range] {
+  width: 100%;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+.land-use-readout {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink-soft);
+  text-align: center;
+}
+@media (max-width: 520px) {
+  .land-use-control { grid-template-columns: 1fr 1fr; }
+  .land-use-control input[type=range] { grid-column: 1 / -1; grid-row: 2; }
+  .land-use-end { grid-row: 1; }
+}
+
+.land-use-row[hidden] { display: none; }
