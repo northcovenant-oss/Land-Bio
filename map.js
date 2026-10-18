@@ -25,15 +25,96 @@
     // theme.js applies the theme-* class.
     return getComputedStyle(document.body).getPropertyValue('--neutral-fill').trim() || '#c9b98c';
   }
-  const LAYERS = [
-    { id: 'provinces', label: 'Provinces', type: 'neutral' },
-    { id: 'economic',  label: 'Economic Output', type: 'data' },
-    { id: 'climate',   label: 'Climate', type: 'climate' },
-    // Terrain shows the topography image (TERRAIN_IMAGE in data.js) under the
-    // province borders; without an image it falls back to the placeholder hatch.
-    { id: 'terrain',   label: 'Terrain', type: (typeof TERRAIN_IMAGE !== 'undefined') ? 'image' : 'placeholder' }
+  // ---- Map images (files listed in maps-config.js) ----
+  // A map is either an image laid over the province borders (placed by its
+  // own x/y/width/height in map units - see maps-config.js), a province-
+  // colored data map, or a placeholder when no image has been supplied.
+  const MAP_IMG = (typeof MAP_IMAGES !== 'undefined' && MAP_IMAGES) ? MAP_IMAGES : {};
+  const TERRAIN_BASE = (typeof TERRAIN_IMAGE !== 'undefined') ? TERRAIN_IMAGE : null;
+  // imageKey -> { href, x, y, width, height, legend, legendImg, caption }
+  const IMAGE_SOURCES = {};
+  function registerImage(key, entry){
+    if(!entry || !entry.href) return false;
+    const base = TERRAIN_BASE || { x: 0, y: 0, width: 0, height: 0 };
+    IMAGE_SOURCES[key] = {
+      href: entry.href,
+      x: (entry.x != null ? entry.x : base.x), y: (entry.y != null ? entry.y : base.y),
+      width: (entry.width != null ? entry.width : base.width), height: (entry.height != null ? entry.height : base.height),
+      legend: entry.legend || null, legendImg: entry.legendImg || null, caption: entry.caption || null,
+    };
+    return true;
+  }
+  // id doubles as the config key. Placeholder when the config has no image for it.
+  function imageMap(id, label){
+    return registerImage(id, MAP_IMG[id]) ? { id: id, label: label, type: 'image', imageKey: id }
+                                         : { id: id, label: label, type: 'placeholder' };
+  }
+  // A map with several views (e.g. Hazards): shown in the menu as a heading
+  // with its views listed beneath.
+  function variantMap(label, views){
+    return { label: label, variants: views.map(function(v){ return imageMap(v[0], v[1]); }) };
+  }
+
+  // Each tab is a group with a dropdown of maps. Clicking the tab itself
+  // opens the FIRST map in its list (the current/default one); the caret
+  // opens the full list.
+  const LAYER_GROUPS = [
+    { id: 'provinces', label: 'Provinces', maps: [
+      { id: 'provinces', label: 'Provinces', type: 'neutral' } ] },
+    { id: 'economic', label: 'Economic Output', maps: [
+      { id: 'economic', label: 'Sector Map', type: 'data' },
+      variantMap('Mineral Resources', [
+        ['minerals_rare', 'Rare earths, gems & industrial minerals'],
+        ['minerals_metals', 'Metal deposits'] ]),
+      imageMap('fisheries', 'Fisheries'),
+      // Not created yet - always a placeholder for now.
+      { id: 'agland', label: 'Agriculture Land Use', type: 'placeholder' } ] },
+    { id: 'bioclimate', label: 'Bioclimate', maps: [
+      // the existing province-colored climate map stays the default
+      { id: 'climate', label: 'Province climate', type: 'climate' },
+      imageMap('koppen', 'K\u00f6ppen climate'),
+      imageMap('trewartha', 'Trewartha'),
+      imageMap('biomes', 'Biomes'),
+      variantMap('Temperature', [
+        ['temp_annual', 'Annual mean temperature'],
+        ['temp_jan', 'January temperature'],
+        ['temp_jul', 'July temperature'],
+        ['temp_range', 'Seasonal temperature range'] ]) ] },
+    { id: 'terrain', label: 'Terrain', maps: [
+      // Terrain's id stays 'terrain' - the tooltip's elevation breakdown keys off it.
+      (registerImage('topography', MAP_IMG.topography) || registerImage('topography', TERRAIN_BASE))
+        ? { id: 'terrain', label: 'Topography', type: 'image', imageKey: 'topography' }
+        : { id: 'terrain', label: 'Topography', type: 'placeholder' },
+      variantMap('Currents', [
+        ['currents_warmcold', 'Warm & cold currents'],
+        ['currents_annual', 'Annual mean flow'],
+        ['currents_jan', 'January currents'],
+        ['currents_jul', 'July currents'] ]),
+      variantMap('Hazards', [
+        ['haz_earthquakes', 'Earthquakes'],
+        ['haz_volcanoes', 'Volcanoes'],
+        ['haz_tsunamis', 'Tsunamis'],
+        ['haz_floods', 'Floods'],
+        ['haz_drought', 'Drought'],
+        ['haz_wildfire', 'Wildfire'],
+        ['haz_tornadoes', 'Tornadoes'],
+        ['haz_cyclone_genesis', 'Tropical cyclone formation'],
+        ['haz_cyclone_tracks', 'Tropical cyclone tracks'],
+        ['haz_cyclone_risk', 'Hurricane / typhoon risk'],
+        ['haz_floes', 'Drifting sea ice'],
+        ['haz_icebergs', 'Icebergs'],
+        ['haz_polarlows', 'Polar lows'],
+        ['haz_seafog', 'Sea fog'] ]) ] },
   ];
-  let activeLayer = LAYERS[0];
+  // flat list of selectable maps per group (variants flattened), tagged with their group
+  LAYER_GROUPS.forEach(function(grp){
+    grp.leaves = [];
+    grp.maps.forEach(function(m){
+      if(m.variants){ m.variants.forEach(function(v){ v.group = grp.id; v.parentLabel = m.label; grp.leaves.push(v); }); }
+      else { m.group = grp.id; grp.leaves.push(m); }
+    });
+  });
+  let activeLayer = LAYER_GROUPS[0].leaves[0];
 
   // hatch pattern def for placeholder layers
   const defs = document.createElementNS(NS, 'defs');
@@ -71,25 +152,37 @@
   const gPending = document.createElementNS(NS, 'g');
   svg.appendChild(gPending);
 
-  // Topography backdrop for the Terrain layer (hidden on the other layers).
-  let terrainImageFailed = false;
+  // Image backdrops for the image-type maps (hidden on the other layers):
+  // one <image> per registered source, created up front but only given its
+  // file the first time its map is shown, so the page doesn't download every
+  // map just to load.
+  const imageFailed = {};
+  const imageEls = {};
   const gTerrain = document.createElementNS(NS, 'g');
   gTerrain.style.display = 'none';
-  if(typeof TERRAIN_IMAGE !== 'undefined'){
+  Object.keys(IMAGE_SOURCES).forEach(function(key){
+    const src = IMAGE_SOURCES[key];
     const im = document.createElementNS(NS, 'image');
-    im.setAttribute('href', TERRAIN_IMAGE.href);
-    im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', TERRAIN_IMAGE.href);
-    im.setAttribute('x', TERRAIN_IMAGE.x); im.setAttribute('y', TERRAIN_IMAGE.y);
-    im.setAttribute('width', TERRAIN_IMAGE.width); im.setAttribute('height', TERRAIN_IMAGE.height);
+    im.setAttribute('x', src.x); im.setAttribute('y', src.y);
+    im.setAttribute('width', src.width); im.setAttribute('height', src.height);
     im.setAttribute('preserveAspectRatio', 'none');
     im.style.pointerEvents = 'none';
-    // if the image can't be loaded, say so on the Terrain layer instead of failing silently
+    im.style.display = 'none';
+    // if the image can't be loaded, say so on its layer instead of failing silently
     im.addEventListener('error', function(){
-      terrainImageFailed = true;
-      console.warn('Terrain image failed to load:', String(TERRAIN_IMAGE.href).slice(0, 80));
-      if(activeLayer && activeLayer.type === 'image'){ setLayer(activeLayer); }
+      imageFailed[key] = true;
+      console.warn('Map image failed to load (' + key + '):', String(src.href).slice(0, 80));
+      if(activeLayer && activeLayer.imageKey === key){ setLayer(activeLayer); }
     });
+    imageEls[key] = im;
     gTerrain.appendChild(im);
+  });
+  function ensureImageLoaded(key){
+    const im = imageEls[key];
+    if(!im || im.getAttribute('href')) return;
+    const href = IMAGE_SOURCES[key].href;
+    im.setAttribute('href', href);
+    im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
   }
   svg.appendChild(gTerrain);
 
@@ -240,21 +333,108 @@
     claimsToggleState.textContent = claimsEnabled ? 'On' : 'Off';
   }
 
-  // ---- Layer tab bar ----
+  // ---- Layer tab bar (tabs with dropdown menus) ----
   const layerTabs = document.getElementById('layerTabs');
   const noDataBanner = document.getElementById('noDataBanner');
-  LAYERS.forEach(function(layer){
+  const tabEls = {};
+  let openMenuGroup = null;
+
+  const layerMenu = document.createElement('div');
+  layerMenu.className = 'layer-menu';
+  layerMenu.setAttribute('role', 'menu');
+  layerMenu.hidden = true;
+  document.body.appendChild(layerMenu);
+
+  function closeLayerMenu(){
+    layerMenu.hidden = true;
+    if(openMenuGroup && tabEls[openMenuGroup]){ tabEls[openMenuGroup].caret.setAttribute('aria-expanded', 'false'); }
+    openMenuGroup = null;
+  }
+  function openLayerMenu(grp){
+    if(openMenuGroup === grp.id){ closeLayerMenu(); return; }
+    closeLayerMenu();
+    layerMenu.innerHTML = '';
+    function addItem(m, indent){
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.setAttribute('role', 'menuitem');
+      item.className = 'layer-menu-item' + (indent ? ' layer-menu-sub' : '') + (activeLayer === m ? ' active' : '');
+      item.textContent = m.label + (m.type === 'placeholder' ? ' (coming soon)' : '');
+      item.addEventListener('click', function(){ closeLayerMenu(); setLayer(m); });
+      layerMenu.appendChild(item);
+    }
+    grp.maps.forEach(function(m){
+      if(m.variants){
+        const head = document.createElement('div');
+        head.className = 'layer-menu-head';
+        head.textContent = m.label;
+        layerMenu.appendChild(head);
+        m.variants.forEach(function(v){ addItem(v, true); });
+      } else {
+        addItem(m, false);
+      }
+    });
+    const tab = tabEls[grp.id];
+    const r = tab.wrap.getBoundingClientRect();
+    layerMenu.hidden = false;
+    // fixed-position so the tab strip's own scrolling (small screens) can't clip it
+    layerMenu.style.maxHeight = '';
+    const mw = layerMenu.offsetWidth;
+    const below = window.innerHeight - r.bottom - 12, above = r.top - 12;
+    const natural = layerMenu.scrollHeight;
+    // open downward if it fits (or there's more room below); otherwise upward
+    // (the strip sits at the bottom on small screens), capped to the room available
+    const goDown = natural <= below || below >= above;
+    const room = Math.max(120, goDown ? below : above);
+    layerMenu.style.maxHeight = Math.min(room, natural) + 'px';
+    const mh = layerMenu.offsetHeight;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - mw - 8);
+    const top = goDown ? r.bottom + 4 : Math.max(8, r.top - mh - 4);
+    layerMenu.style.left = left + 'px';
+    layerMenu.style.top = top + 'px';
+    openMenuGroup = grp.id;
+    tab.caret.setAttribute('aria-expanded', 'true');
+  }
+  document.addEventListener('click', function(e){
+    if(openMenuGroup && !layerMenu.contains(e.target) && !(tabEls[openMenuGroup] && tabEls[openMenuGroup].wrap.contains(e.target))) closeLayerMenu();
+  });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeLayerMenu(); });
+  window.addEventListener('resize', closeLayerMenu);
+  layerTabs.addEventListener('scroll', closeLayerMenu);
+
+  LAYER_GROUPS.forEach(function(grp){
+    const wrap = document.createElement('div');
+    wrap.className = 'layer-tab-wrap';
     const btn = document.createElement('button');
-    btn.className = 'layer-tab' + (layer.id === activeLayer.id ? ' active' : '');
-    btn.textContent = layer.label;
-    btn.addEventListener('click', function(){ setLayer(layer); });
-    layerTabs.appendChild(btn);
+    btn.className = 'layer-tab';
+    btn.textContent = grp.label;
+    // Clicking the tab itself always opens the group's default (first) map.
+    btn.addEventListener('click', function(){ closeLayerMenu(); setLayer(grp.leaves[0]); });
+    wrap.appendChild(btn);
+    let caret = null;
+    if(grp.leaves.length > 1){
+      caret = document.createElement('button');
+      caret.className = 'layer-tab layer-tab-caret';
+      caret.type = 'button';
+      caret.textContent = '\u25be';
+      caret.setAttribute('aria-label', grp.label + ' maps');
+      caret.setAttribute('aria-haspopup', 'menu');
+      caret.setAttribute('aria-expanded', 'false');
+      caret.addEventListener('click', function(e){ e.stopPropagation(); openLayerMenu(grp); });
+      wrap.appendChild(caret);
+    }
+    layerTabs.appendChild(wrap);
+    tabEls[grp.id] = { wrap: wrap, btn: btn, caret: caret || { setAttribute: function(){} }, grp: grp };
   });
 
   function setLayer(layer){
     activeLayer = layer;
-    Array.from(layerTabs.children).forEach(function(btn, i){
-      btn.classList.toggle('active', LAYERS[i].id === layer.id);
+    LAYER_GROUPS.forEach(function(grp){
+      const t = tabEls[grp.id];
+      const on = grp.id === layer.group;
+      t.wrap.classList.toggle('active', on);
+      // Show the chosen map beside the tab name when it isn't the group's default.
+      t.btn.textContent = (on && grp.leaves.length > 1 && grp.leaves[0] !== layer) ? grp.label + ' \u00b7 ' + layer.label : grp.label;
     });
     PROVINCES.forEach(function(p){
       const el = provinceEls[p.id];
@@ -264,27 +444,46 @@
       else if(layer.type === 'climate'){
         fill = p.climate ? CLIMATE_COLOR[p.climate.display || p.climate.dominant] : '#cabf9e';
       }
-      // see-through (but still clickable) so the topography shows beneath the borders
+      // see-through (but still clickable) so the map image shows beneath the borders
       else if(layer.type === 'image'){ fill = 'rgba(0,0,0,0)'; }
       else { fill = 'url(#noDataHatch)'; }
       el.setAttribute('fill', fill);
     });
     applyTakenStyling();
-    const imageMissing = layer.type === 'image' && terrainImageFailed;
+    const imageMissing = layer.type === 'image' && !!imageFailed[layer.imageKey];
     noDataBanner.classList.toggle('show', layer.type === 'placeholder' || imageMissing);
     if(layer.type === 'placeholder'){
-      noDataBanner.textContent = 'No ' + layer.label.toLowerCase() + ' data yet \u2014 this layer is a placeholder. Provinces are still selectable.';
+      noDataBanner.textContent = 'No ' + layer.label + ' map yet \u2014 this is a placeholder. Provinces are still selectable.';
     } else if(imageMissing){
-      noDataBanner.textContent = 'The terrain image could not be loaded. Provinces are still selectable.';
+      noDataBanner.textContent = 'The ' + layer.label + ' image could not be loaded. Provinces are still selectable.';
     }
-    const terrainLegend = (typeof TERRAIN_LEGEND !== 'undefined') ? TERRAIN_LEGEND : null;
-    legend.classList.toggle('show', layer.type === 'data' || layer.type === 'climate' || (layer.type === 'image' && !!terrainLegend));
+    const imgSrc = layer.type === 'image' ? IMAGE_SOURCES[layer.imageKey] : null;
+    if(imgSrc && !imageFailed[layer.imageKey]) ensureImageLoaded(layer.imageKey);
+    const imgLegend = imgSrc ? imgSrc.legend : null;
     legend.innerHTML = '';
+    const hasLegendImg = !!(imgSrc && imgSrc.legendImg);
+    const hasCaption = !!(imgSrc && imgSrc.caption);
+    legend.classList.toggle('show', layer.type === 'data' || layer.type === 'climate' || !!imgLegend || hasLegendImg || hasCaption);
+    legend.classList.toggle('legend-wide', hasLegendImg || hasCaption);
+    if(hasCaption){
+      const cap = document.createElement('div');
+      cap.className = 'legend-caption';
+      cap.textContent = imgSrc.caption;
+      legend.appendChild(cap);
+    }
     const activeLegendData = layer.type === 'climate' ? CLIMATE_LEGEND
-      : (layer.type === 'data' ? ECON_LEGEND : (layer.type === 'image' ? terrainLegend : null));
+      : (layer.type === 'data' ? ECON_LEGEND : (layer.type === 'image' ? imgLegend : null));
     if(activeLegendData){ buildLegend(activeLegendData, layer.type); }
+    if(hasLegendImg){
+      const li = document.createElement('img');
+      li.className = 'legend-img';
+      li.alt = layer.label + ' legend';
+      li.src = imgSrc.legendImg;
+      legend.appendChild(li);
+    }
     gExtra.style.display = (layer.id === 'provinces') ? '' : 'none';
-    // the topography image already shows all land, so the greyed placeholder land is hidden there
+    // an image map already shows all land, so the greyed placeholder land is hidden there
+    Object.keys(imageEls).forEach(function(k){ imageEls[k].style.display = (layer.imageKey === k) ? '' : 'none'; });
     gTerrain.style.display = (layer.type === 'image') ? '' : 'none';
     gPending.style.display = (layer.type === 'image') ? 'none' : '';
   }
@@ -296,7 +495,7 @@
 
   function buildLegend(items, type){
     items.forEach(function(item){
-      const key = type === 'climate' ? item.climate : (type === 'image' ? item.terrain : item.econ);
+      const key = type === 'climate' ? item.climate : (type === 'image' ? (item.terrain || item.label) : item.econ);
       const row = document.createElement('div');
       row.className = 'legend-row';
       const present = type === 'image' ? true : (type === 'climate'
