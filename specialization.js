@@ -54,57 +54,106 @@
   // ---- Step 1: Land Use ----
   //
   // Four tradeoff sliders. Each runs 0-100 between two competing uses
-  // (50 = an even split). The values are kept in landUse for later, but
-  // nothing reads them yet - they don't feed the specialization, production
-  // or application output.
+  // (50 = an even split). They're fed by the Agriculture Land Use map: the
+  // bio page hands over snapshot.agLandUse, saying for each output (cropland,
+  // plantation, forestry, pasture/herding, rubber, fishing) how many of the
+  // claim's provinces can viably do it and how strong it is on average.
   //
-  // Hiding irrelevant sliders: each slider has a relevant(snapshot)
-  // function saying whether it applies to this claim (e.g. no point asking
-  // Herding vs Forestry if the claim has no forest or grazing land). The
-  // switch below is OFF on purpose until real data feeds into the sliders -
-  // while it's off, every slider always shows, whatever relevant() returns.
-  // To turn it on later: set LAND_USE_HIDE_IRRELEVANT to true and fill in
-  // each relevant() with its real test (they all return true for now).
-  const LAND_USE_HIDE_IRRELEVANT = false;
+  //  - A slider is hidden when either of its two uses isn't viable anywhere in
+  //    the claim (there's nothing to trade off).
+  //  - Each slider starts weighted toward whichever use the land favours more.
+  //  - Plantation is a SUBSET of cropland: "Cropland vs Plantation" is the share
+  //    of the cropland that's plantation, so setting it to 100% plantation and
+  //    cropland to 20% against forestry gives 20% plantation, 80% forestry.
+  //    (Rubber counts as a plantation crop.)
+  //
+  // The slider values are kept in landUse for later; nothing reads them yet -
+  // they don't feed the specialization, production or application output.
+  // Older snapshots without agLandUse simply show every slider at 50.
+  const LAND_USE_HIDE_IRRELEVANT = true;
+  const LAND_USE_LABELS = { cropland: 'Cropland', plantation: 'Plantation', forestry: 'Forestry', pasture: 'Herding', rubber: 'Rubber', fishing: 'Fishing' };
   const LAND_USE_SLIDERS = [
-    { id: 'cropland-forestry',  left: 'Cropland', right: 'Forestry',   relevant: function(snap){ return true; } },
-    { id: 'cropland-cashcrops', left: 'Cropland', right: 'Cash Crops', relevant: function(snap){ return true; } },
-    { id: 'herding-cropland',   left: 'Herding',  right: 'Cropland',   relevant: function(snap){ return true; } },
-    { id: 'herding-forestry',   left: 'Herding',  right: 'Forestry',   relevant: function(snap){ return true; } },
+    { id: 'cropland-forestry',    left: 'Cropland', right: 'Forestry',   leftKey: 'cropland', rightKey: 'forestry' },
+    { id: 'cropland-plantation',  left: 'Cropland', right: 'Plantation', leftKey: 'cropland', rightKey: 'plantation' },
+    { id: 'herding-cropland',     left: 'Herding',  right: 'Cropland',   leftKey: 'pasture',  rightKey: 'cropland' },
+    { id: 'herding-forestry',     left: 'Herding',  right: 'Forestry',   leftKey: 'pasture',  rightKey: 'forestry' },
   ];
+  const agData = (snapshot.agLandUse && snapshot.agLandUse.outputs) ? snapshot.agLandUse : null;
+  function agOutput(key){ return agData && agData.outputs[key] ? agData.outputs[key] : null; }
+  function landUseRelevant(def){
+    if(!agData) return true;
+    const l = agOutput(def.leftKey), r = agOutput(def.rightKey);
+    return !!(l && r && l.viable > 0 && r.viable > 0);
+  }
   function isLandUseSliderVisible(def){
     if(!LAND_USE_HIDE_IRRELEVANT) return true;
-    try { return !!def.relevant(snapshot); } catch(e){ return true; }
+    try { return landUseRelevant(def); } catch(e){ return true; }
+  }
+  // starting point: share of the right-hand use among the two, softened toward the middle
+  function landUseDefault(def){
+    if(!agData) return 50;
+    const l = agOutput(def.leftKey), r = agOutput(def.rightKey);
+    if(!l || !r || (l.avg + r.avg) <= 0) return 50;
+    const share = r.avg / (l.avg + r.avg);
+    return Math.max(10, Math.min(90, Math.round(share * 100)));
+  }
+  function landUseHint(def){
+    if(!agData) return '';
+    const l = agOutput(def.leftKey), r = agOutput(def.rightKey);
+    if(!l || !r) return '';
+    const n = agData.count;
+    return LAND_USE_LABELS[def.leftKey] + ' is viable in ' + l.viable + ' of ' + n + ' provinces · ' +
+      LAND_USE_LABELS[def.rightKey] + ' in ' + r.viable + '.' +
+      (def.rightKey === 'plantation' ? ' Plantation is a share of your cropland.' : '');
   }
   const landUse = {};
   (function renderLandUseSliders(){
     const host = document.getElementById('landUseSliders');
     if(!host) return;
+    // other outputs the land supports that have no slider
+    if(agData){
+      const extras = ['rubber', 'fishing'].filter(function(k){ return agOutput(k) && agOutput(k).viable > 0; })
+        .map(function(k){ return LAND_USE_LABELS[k] + ' (' + agOutput(k).viable + ' of ' + agData.count + ' provinces)'; });
+      const note = document.createElement('p');
+      note.className = 'land-use-hint land-use-note';
+      note.textContent = extras.length ? 'Also viable in your claim: ' + extras.join(', ') + '.' : '';
+      if(extras.length) host.appendChild(note);
+    }
+    let shown = 0;
     LAND_USE_SLIDERS.forEach(function(def){
-      landUse[def.id] = 50;
+      const start = landUseDefault(def);
+      landUse[def.id] = start;
       const row = document.createElement('div');
       row.className = 'land-use-row';
       row.hidden = !isLandUseSliderVisible(def);
+      if(!row.hidden) shown++;
       row.innerHTML =
         '<div class="land-use-title">' + def.left + ' vs ' + def.right + '</div>' +
         '<div class="land-use-control">' +
           '<span class="land-use-end">' + def.left + '</span>' +
-          '<input type="range" min="0" max="100" step="1" value="50" aria-label="' + def.left + ' vs ' + def.right + '">' +
+          '<input type="range" min="0" max="100" step="1" value="' + start + '" aria-label="' + def.left + ' vs ' + def.right + '">' +
           '<span class="land-use-end">' + def.right + '</span>' +
         '</div>' +
-        '<div class="land-use-readout"></div>';
+        '<div class="land-use-readout"></div>' +
+        '<div class="land-use-hint">' + landUseHint(def) + '</div>';
       const input = row.querySelector('input');
       const readout = row.querySelector('.land-use-readout');
       function update(){
         const v = parseInt(input.value, 10);
         landUse[def.id] = v;
-        readout.textContent = (100 - v) + '% ' + def.left + ' \u00b7 ' + v + '% ' + def.right;
+        readout.textContent = (100 - v) + '% ' + def.left + ' · ' + v + '% ' + def.right;
         input.style.setProperty('--fill', v + '%');
       }
       input.addEventListener('input', update);
       update();
       host.appendChild(row);
     });
+    if(shown === 0){
+      const none = document.createElement('p');
+      none.className = 'land-use-hint';
+      none.textContent = 'Your claim doesn’t have two competing land uses to balance, so there’s nothing to set here. Continue to the next step.';
+      host.appendChild(none);
+    }
   })();
 
   // ---- Step 2: one slot per World Exports rank, tied to that rank's sector ----

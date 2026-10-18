@@ -490,17 +490,17 @@ const CLIMATE_SPEC_REQUIREMENTS = {
 // no dedicated econ type of their own in this project (adding one would
 // mean reworking the food/energy/population/GDP formulas AND reclassifying
 // every existing province in data.js - a much bigger change than this),
-// so both are grouped under Agriculture Focused/Oriented, matching how
+// so both are grouped under the Agriculture sector, matching how
 // agriculture/forestry/fishing are commonly grouped as primary biological
-// production in real-world classification. Mining requires Mineral
-// Focused/Oriented. Fuel isn't listed here - it's already gated
-// indirectly, since only Energy Focused/Oriented provinces roll a
+// production in real-world classification. Mining requires a Mineral
+// province. Fuel isn't listed here - it's already gated
+// indirectly, since only Energy provinces roll a
 // resource at all (see rollProvinceResources in landbio.js).
 const PRIMARY_ECON_SECTOR_REQUIREMENTS = {
-  "Agriculture": ["Agriculture Focused", "Agriculture Oriented"],
-  "Fishing":     ["Agriculture Focused", "Agriculture Oriented"],
-  "Forestry":    ["Agriculture Focused", "Agriculture Oriented"],
-  "Mining":      ["Mineral Focused", "Mineral Oriented"],
+  "Agriculture": ["Agriculture"],
+  "Fishing":     ["Agriculture"],
+  "Forestry":    ["Agriculture"],
+  "Mining":      ["Mineral"],
 };
 
 // General-purpose "does this specialization's requirement check out"

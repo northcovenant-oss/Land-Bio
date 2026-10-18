@@ -67,8 +67,8 @@
         ['minerals_rare', 'Rare earths, gems & industrial minerals'],
         ['minerals_metals', 'Metal deposits'] ]),
       imageMap('fisheries', 'Fisheries'),
-      // Not created yet - always a placeholder for now.
-      { id: 'agland', label: 'Agriculture Land Use', type: 'placeholder' } ] },
+      // Icon map of which farming/fishing outputs are viable (data in agland-data.js)
+      { id: 'agland', label: 'Agriculture Land Use', type: (typeof AGLAND !== 'undefined') ? 'agland' : 'placeholder' } ] },
     { id: 'bioclimate', label: 'Bioclimate', maps: [
       // the existing province-colored climate map stays the default
       { id: 'climate', label: 'Province climate', type: 'climate' },
@@ -246,6 +246,132 @@
     el.style.pointerEvents = 'none';
     (CONTINENT_GROUPS[l.continent] || g).appendChild(el);
   });
+
+
+  // ---- Agriculture Land Use (icons per province; data in agland-data.js) ----
+  // AGLAND[label] = scores 0-100 in AGLAND_OUTPUTS order; an output counts as
+  // viable in a province when its score reaches AGLAND_THRESHOLDS[i].
+  const AG_DEFS = [
+    { key: 'cropland',   label: 'Cropland',    color: '#c9951a' },
+    { key: 'plantation', label: 'Plantations', color: '#d2691e' },
+    { key: 'forestry',   label: 'Forestry',    color: '#2e7d32' },
+    { key: 'rubber',     label: 'Rubber',      color: '#7b4a2e' },
+    { key: 'pasture',    label: 'Pastures',    color: '#6a9a1f' },
+    { key: 'fishing',    label: 'Fishing',     color: '#1f78b4' },
+  ];
+  const AG_OK = (typeof AGLAND !== 'undefined' && typeof AGLAND_OUTPUTS !== 'undefined');
+  // glyphs drawn in a 24x24 box (inside a white badge so they read on any tint)
+  const AG_GLYPHS = {
+    cropland:
+      '<path d="M12 22V8" stroke="C" stroke-width="1.6" fill="none" stroke-linecap="round"/>' +
+      '<ellipse cx="12" cy="5.2" rx="1.7" ry="3" fill="C"/>' +
+      '<ellipse cx="8.6" cy="10.2" rx="1.6" ry="3" fill="C" transform="rotate(-38 8.6 10.2)"/>' +
+      '<ellipse cx="15.4" cy="10.2" rx="1.6" ry="3" fill="C" transform="rotate(38 15.4 10.2)"/>' +
+      '<ellipse cx="8.6" cy="15.4" rx="1.6" ry="3" fill="C" transform="rotate(-38 8.6 15.4)"/>' +
+      '<ellipse cx="15.4" cy="15.4" rx="1.6" ry="3" fill="C" transform="rotate(38 15.4 15.4)"/>',
+    plantation:
+      '<path d="M12.6 22C12.4 17 12.8 12 14 8.5" stroke="C" stroke-width="1.8" fill="none" stroke-linecap="round"/>' +
+      '<path d="M14 8.5C11 5.2 7 5.4 4.2 8.2M14 8.5C12.6 4.8 9.4 3 6 3.6M14 8.5C15.8 4.6 19 3.4 22 4.8M14 8.5C17.4 6.4 20.8 8.2 21.8 11.4" stroke="C" stroke-width="1.7" fill="none" stroke-linecap="round"/>' +
+      '<circle cx="12.6" cy="10.2" r="1.3" fill="C"/>',
+    forestry:
+      '<path d="M12 2.5L6.2 10h3.2L4.6 16h5.2L12 15.4 14.2 16h5.2l-4.8-6h3.2z" fill="C"/>' +
+      '<rect x="11" y="15.5" width="2" height="6" fill="C"/>',
+    rubber:
+      '<path d="M12 2.4C12 2.4 5.4 10 5.4 14.6a6.6 6.6 0 0 0 13.2 0C18.6 10 12 2.4 12 2.4z" fill="C"/>' +
+      '<path d="M8.6 14.8a3.4 3.4 0 0 0 2.6 3.2" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round"/>',
+    pasture:
+      '<circle cx="7.6" cy="11.6" r="3.2" fill="C"/><circle cx="12" cy="9.8" r="3.6" fill="C"/><circle cx="16.2" cy="11.6" r="3.2" fill="C"/>' +
+      '<ellipse cx="12" cy="13.2" rx="6.6" ry="3.6" fill="C"/>' +
+      '<circle cx="19.8" cy="10.2" r="2.2" fill="C"/>' +
+      '<path d="M8.4 16.4V21M15.6 16.4V21" stroke="C" stroke-width="1.7" stroke-linecap="round"/>',
+    fishing:
+      '<path d="M2.4 12C5.4 6.8 11 5.6 15 8c1.4.8 2.4 2.4 2.4 4s-1 3.2-2.4 4c-4 2.4-9.6 1.2-12.6-4z" fill="C"/>' +
+      '<path d="M16.6 12l5-4.2v8.4z" fill="C"/>' +
+      '<circle cx="7.2" cy="11.2" r="1.1" fill="#fff"/>',
+  };
+  function agViable(label){
+    const row = AG_OK ? AGLAND[label] : null;
+    if(!row) return [];
+    const out = [];
+    AGLAND_OUTPUTS.forEach(function(k, i){
+      if(row[i] >= AGLAND_THRESHOLDS[i]) out.push({ key: k, score: row[i] });
+    });
+    out.sort(function(a, b){ return b.score - a.score; });
+    return out;
+  }
+  function agDef(key){ for(let i = 0; i < AG_DEFS.length; i++){ if(AG_DEFS[i].key === key) return AG_DEFS[i]; } return null; }
+  function agTint(label){
+    const v = agViable(label);
+    if(!v.length) return null;
+    return agDef(v[0].key).color;
+  }
+  const gAgByContinent = {};
+  let agIconsBuilt = false;
+  function ensureAgIcons(){
+    if(agIconsBuilt || !AG_OK) return;
+    agIconsBuilt = true;
+    const defs = document.createElementNS(NS, 'defs');
+    AG_DEFS.forEach(function(d){
+      const sym = document.createElementNS(NS, 'symbol');
+      sym.setAttribute('id', 'ag-' + d.key);
+      sym.setAttribute('viewBox', '0 0 24 24');
+      sym.innerHTML = '<circle cx="12" cy="12" r="11.4" fill="#fff" fill-opacity="0.92" stroke="' + d.color + '" stroke-width="1.1"/>' +
+        '<g transform="translate(5 5) scale(0.583)">' + AG_GLYPHS[d.key].replace(/"C"/g, '"' + d.color + '"') + '</g>';
+      defs.appendChild(sym);
+    });
+    svg.insertBefore(defs, svg.firstChild);
+    CONTINENT_ORDER.forEach(function(cid){
+      const gg = document.createElementNS(NS, 'g');
+      gg.setAttribute('class', 'ag-icons');
+      gg.style.pointerEvents = 'none';
+      gg.style.display = 'none';
+      CONTINENT_GROUPS[cid].appendChild(gg);
+      gAgByContinent[cid] = gg;
+    });
+    PROVINCES.forEach(function(p){
+      const v = agViable(p.label);
+      if(!v.length) return;
+      const c = centroid(p.d);
+      if(!c) return;
+      const area = (p.geo && p.geo.area) ? p.geo.area : 80;
+      const box = Math.max(3, Math.sqrt(area) * 0.78);
+      // icons that fit: 1, up to 4 (2x2), or up to 6 (3x2)
+      const n = Math.min(v.length, 6);
+      const cols = n <= 1 ? 1 : (n <= 4 ? 2 : 3);
+      const rows = Math.ceil(n / cols);
+      const cell = box / Math.max(cols, rows);
+      const size = Math.min(cell * 0.94, 9);
+      const gg = gAgByContinent[p.continent] || gAgByContinent[CONTINENT_ORDER[0]];
+      for(let i = 0; i < n; i++){
+        const r = Math.floor(i / cols), col = i % cols;
+        const inRow = (r === rows - 1) ? (n - r * cols) : cols;   // centre a short last row
+        const x = c.x + (col - (inRow - 1) / 2) * cell - size / 2;
+        const y = c.y + (r - (rows - 1) / 2) * cell - size / 2;
+        const u = document.createElementNS(NS, 'use');
+        u.setAttribute('href', '#ag-' + v[i].key);
+        u.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#ag-' + v[i].key);
+        u.setAttribute('x', x.toFixed(2)); u.setAttribute('y', y.toFixed(2));
+        u.setAttribute('width', size.toFixed(2)); u.setAttribute('height', size.toFixed(2));
+        gg.appendChild(u);
+      }
+    });
+  }
+  function buildAgLegend(){
+    const note = document.createElement('div');
+    note.className = 'legend-caption';
+    note.textContent = 'Which farming and fishing outputs are economically viable in each province (from its biomes, climate, terrain and coastal waters). Zoom in to see every icon; the colour shows the strongest output.';
+    legend.appendChild(note);
+    AG_DEFS.forEach(function(d){
+      let n = 0;
+      PROVINCES.forEach(function(p){ if(agViable(p.label).some(function(o){ return o.key === d.key; })) n++; });
+      const row = document.createElement('div');
+      row.className = 'legend-row';
+      row.innerHTML =
+        '<svg class="legend-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><use href="#ag-' + d.key + '"></use></svg>' +
+        '<span class="legend-label">' + d.label + '</span>';
+      legend.appendChild(row);
+    });
+  }
 
   const byId = {};
   PROVINCES.forEach(function(p){ byId[p.id] = p; });
@@ -427,8 +553,16 @@
     tabEls[grp.id] = { wrap: wrap, btn: btn, caret: caret || { setAttribute: function(){} }, grp: grp };
   });
 
+  function mixColor(a, b, t){
+    function p(h){ h = String(h).trim(); if(h[0] === '#'){ if(h.length === 4){ h = '#' + h[1]+h[1]+h[2]+h[2]+h[3]+h[3]; } return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+      const m = h.match(/\d+/g); return m ? [+m[0], +m[1], +m[2]] : [201,185,140]; }
+    const x = p(a), y = p(b);
+    return 'rgb(' + [0,1,2].map(function(i){ return Math.round(x[i] + (y[i]-x[i]) * t); }).join(',') + ')';
+  }
+
   function setLayer(layer){
     activeLayer = layer;
+    if(layer.type === 'agland'){ ensureAgIcons(); }
     LAYER_GROUPS.forEach(function(grp){
       const t = tabEls[grp.id];
       const on = grp.id === layer.group;
@@ -445,6 +579,11 @@
         fill = p.climate ? CLIMATE_COLOR[p.climate.display || p.climate.dominant] : '#cabf9e';
       }
       // see-through (but still clickable) so the map image shows beneath the borders
+      else if(layer.type === 'agland'){
+        const tint = agTint(p.label);
+        // pale wash of the strongest output's colour over the neutral land
+        fill = tint ? mixColor(getNeutralFill(), tint, 0.38) : getNeutralFill();
+      }
       else if(layer.type === 'image'){ fill = 'rgba(0,0,0,0)'; }
       else { fill = 'url(#noDataHatch)'; }
       el.setAttribute('fill', fill);
@@ -463,14 +602,16 @@
     legend.innerHTML = '';
     const hasLegendImg = !!(imgSrc && imgSrc.legendImg);
     const hasCaption = !!(imgSrc && imgSrc.caption);
-    legend.classList.toggle('show', layer.type === 'data' || layer.type === 'climate' || !!imgLegend || hasLegendImg || hasCaption);
-    legend.classList.toggle('legend-wide', hasLegendImg || hasCaption);
+    legend.classList.toggle('show', layer.type === 'data' || layer.type === 'climate' || layer.type === 'agland' || !!imgLegend || hasLegendImg || hasCaption);
+    legend.classList.toggle('legend-wide', hasLegendImg || hasCaption || layer.type === 'agland');
     if(hasCaption){
       const cap = document.createElement('div');
       cap.className = 'legend-caption';
       cap.textContent = imgSrc.caption;
       legend.appendChild(cap);
     }
+    if(layer.type === 'agland'){ buildAgLegend(); }
+    Object.keys(gAgByContinent).forEach(function(k){ gAgByContinent[k].style.display = (layer.type === 'agland') ? '' : 'none'; });
     const activeLegendData = layer.type === 'climate' ? CLIMATE_LEGEND
       : (layer.type === 'data' ? ECON_LEGEND : (layer.type === 'image' ? imgLegend : null));
     if(activeLegendData){ buildLegend(activeLegendData, layer.type); }
@@ -516,7 +657,19 @@
       const claim = takenIndex[p.label.toUpperCase()];
       sub = 'Claimed by ' + claim.name + (claim.isNpc ? ' - NPC' : '');
     } else if(activeLayer.id === 'economic'){
-      sub = p.econ;
+      // the province's sector profile, largest first (e.g. "Agriculture 58% \u00b7 Services 22% \u00b7 Manufacturing 12%")
+      if(p.sectors){
+        sub = Object.keys(p.sectors)
+          .filter(function(k){ return p.sectors[k] > 0; })
+          .sort(function(a, b){ return p.sectors[b] - p.sectors[a]; })
+          .slice(0, 3)
+          .map(function(k){ return k + ' ' + p.sectors[k] + '%'; }).join(' \u00b7 ');
+      } else {
+        sub = p.econ;
+      }
+    } else if(activeLayer.type === 'agland'){
+      const v = agViable(p.label);
+      sub = v.length ? v.map(function(o){ return agDef(o.key).label; }).join(', ') : 'No viable agriculture';
     } else if(activeLayer.id === 'climate'){
       if(p.climate){
         const parts = Object.entries(p.climate.breakdown)
@@ -797,6 +950,33 @@
     return div.innerHTML;
   }
 
+  // Per-claim Agriculture Land Use summary, handed to the specialization page's
+  // Land Use step: for each output, how many claimed provinces can viably do it
+  // and the average viability score (0-100) across the claim. "plantation"
+  // counts rubber too (rubber is a plantation crop); "rubber" is also kept
+  // separately, along with fishing, for display.
+  function agLandUseSummary(provinces){
+    if(!AG_OK) return null;
+    const keys = ['cropland', 'plantation', 'forestry', 'pasture', 'rubber', 'fishing'];
+    const out = {};
+    keys.forEach(function(k){ out[k] = { viable: 0, avg: 0 }; });
+    provinces.forEach(function(p){
+      const row = AGLAND[p.label];
+      if(!row) return;
+      const sc = {}, ok = {};
+      AGLAND_OUTPUTS.forEach(function(k, i){ sc[k] = row[i]; ok[k] = row[i] >= AGLAND_THRESHOLDS[i]; });
+      sc.plantationAll = Math.max(sc.plantation, sc.rubber);
+      ok.plantationAll = ok.plantation || ok.rubber;
+      keys.forEach(function(k){
+        const kk = k === 'plantation' ? 'plantationAll' : k;
+        if(ok[kk]) out[k].viable++;
+        out[k].avg += sc[kk];
+      });
+    });
+    keys.forEach(function(k){ out[k].avg = provinces.length ? Math.round(out[k].avg / provinces.length) : 0; });
+    return { count: provinces.length, outputs: out };
+  }
+
   function writeBioPage(targetWindow, provinces, result, loading){
     const themeClass = Array.from(document.body.classList).find(function(c){ return c.indexOf('theme-') === 0; }) || '';
     const provinceList = provinces.map(function(p){ return p.label + (p.isCapital ? ' \u2605' : ''); }).join(', ');
@@ -931,7 +1111,8 @@
                        '<button id="copyBbcBtn">Copy BBC Code</button></div>\n' +
                        '    <textarea id="bbcSource" readonly>' + escapeHtml(bbcCode) + '</textarea>\n' +
                        '    <script type="application/json" id="perProvinceEnergyData">' + JSON.stringify((result && result.perProvinceEnergy) || []) + '</script>\n' +
-                       '    <script type="application/json" id="claimMapHandoffData">' + JSON.stringify(claimMapHandoffHtml) + '</script>\n') +
+                       '    <script type="application/json" id="claimMapHandoffData">' + JSON.stringify(claimMapHandoffHtml) + '</script>\n' +
+                       '    <script type="application/json" id="agLandUseData">' + JSON.stringify(agLandUseSummary(provinces)).replace(/</g, '\\u003c') + '</script>\n') +
       '    <div class="claim-code-block">\n' +
       '      <div class="cc-title">Claim Code &mdash; paste this into "Load a Claim Code" on the map to recreate this exact selection</div>\n' +
       '      <div class="claim-code-value" id="claimCodeValue">' + escapeHtml(claimCode) + '</div>\n' +
@@ -1000,6 +1181,7 @@
       '          claimCode: (function(){ var el = document.getElementById("claimCodeValue"); return el ? el.textContent.trim() : ""; })(),\n' +
       '          perProvinceEnergy: (function(){ var el = document.getElementById("perProvinceEnergyData"); try { return el ? JSON.parse(el.textContent) : []; } catch(e){ return []; } })(),\n' +
       '          claimMapHtml: (function(){ var el = document.getElementById("claimMapHandoffData"); try { return el ? JSON.parse(el.textContent) : ""; } catch(e){ return ""; } })(),\n' +
+      '          agLandUse: (function(){ var el = document.getElementById("agLandUseData"); try { return el ? JSON.parse(el.textContent) : null; } catch(e){ return null; } })(),\n' +
       '        };\n' +
       '        try {\n' +
       '          localStorage.setItem("landClaimSpecializationSnapshot", JSON.stringify(snapshot));\n' +

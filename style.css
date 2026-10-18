@@ -861,3 +861,5 @@ button.btn-load:hover{ background: rgba(0,0,0,0.05); }
   .legend-caption{ font-size:10.5px; }
 }
 .legend-caption + .legend-row{ margin-top:2px; }
+
+.legend-icon{ flex:none; display:block; width:20px; height:20px; max-width:20px; }
