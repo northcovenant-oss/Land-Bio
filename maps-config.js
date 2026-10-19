@@ -332,3 +332,29 @@ const MAP_IMAGES = {
     "legendImg": "maps/fisheries-legend.webp"
   }
 };
+
+/*
+ * ICON OVERLAYS
+ * -------------
+ * Resource maps drawn as icons only (transparent images in /maps). Each one
+ * gets an on/off button above the map and is shown over whichever map is
+ * selected. Same fields as MAP_IMAGES, plus a label for the button.
+ */
+const OVERLAYS = [
+  {
+    "id": "metals",
+    "label": "Metal deposits",
+    "href": "maps/icons_metals.webp",
+    "x": 2.753, "y": 28.917, "width": 1912.193, "height": 874.246,
+    "legendImg": "maps/icons_metals-legend.png",
+    "caption": "Precious and base metals, iron and the alloy metals. Bigger icon = bigger deposit."
+  },
+  {
+    "id": "rare",
+    "label": "Rare minerals & gems",
+    "href": "maps/icons_rare.webp",
+    "x": 2.753, "y": 28.917, "width": 1912.193, "height": 874.246,
+    "legendImg": "maps/icons_rare-legend.png",
+    "caption": "Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit."
+  }
+];

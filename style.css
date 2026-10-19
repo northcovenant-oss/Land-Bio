@@ -863,3 +863,32 @@ button.btn-load:hover{ background: rgba(0,0,0,0.05); }
 .legend-caption + .legend-row{ margin-top:2px; }
 
 .legend-icon{ flex:none; display:block; width:20px; height:20px; max-width:20px; }
+
+/* ---- Icon overlay toggles ---- */
+.overlay-bar{
+  position:absolute; top:58px; right:24px; z-index:6;
+  display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:4px;
+  max-width:calc(100% - 48px);
+  background: rgba(44,36,23,0.9); border-radius:4px; padding:3px 4px 3px 9px;
+  box-shadow:0 3px 10px rgba(0,0,0,0.3);
+}
+.overlay-bar-title{ font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:#d8cdb0; margin-right:2px; }
+.overlay-btn{
+  display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:12px; cursor:pointer;
+  background:transparent; color:#eadfc4; border:0; border-radius:3px; padding:4px 8px;
+}
+.overlay-btn:hover{ background:rgba(255,255,255,0.1); }
+.overlay-btn-box{ width:12px; height:12px; border:1.5px solid #eadfc4; border-radius:2px; display:inline-block; }
+.overlay-btn[aria-pressed="true"]{ background:rgba(255,255,255,0.16); color:#fff; }
+.overlay-btn[aria-pressed="true"] .overlay-btn-box{ background:#e8b84a; border-color:#e8b84a; box-shadow:inset 0 0 0 2px rgba(44,36,23,0.9); }
+.overlay-legends{
+  position:absolute; left:70px; bottom:18px; z-index:6;
+  display:flex; flex-direction:column; gap:6px; align-items:flex-start; max-width:calc(100% - 100px); pointer-events:none;
+}
+.overlay-legend{ background:#f6fafb; border:1px solid var(--ink); border-radius:4px; padding:3px; box-shadow:0 3px 12px rgba(0,0,0,0.3); }
+.overlay-legend img{ display:block; width:min(300px,100%); height:auto; }
+@media (max-width:700px){
+  .overlay-bar{ top:auto; bottom:64px; right:12px; max-width:calc(100% - 24px); }
+  .overlay-legends{ left:12px; bottom:112px; }
+  .overlay-legend img{ width:170px; }
+}

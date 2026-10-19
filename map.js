@@ -63,9 +63,6 @@
       { id: 'provinces', label: 'Provinces', type: 'neutral' } ] },
     { id: 'economic', label: 'Economic Output', maps: [
       { id: 'economic', label: 'Sector Map', type: 'data' },
-      variantMap('Mineral Resources', [
-        ['minerals_rare', 'Rare earths, gems & industrial minerals'],
-        ['minerals_metals', 'Metal deposits'] ]),
       imageMap('fisheries', 'Fisheries'),
       // Icon map of which farming/fishing outputs are viable (data in agland-data.js)
       { id: 'agland', label: 'Agriculture Land Use', type: (typeof AGLAND !== 'undefined') ? 'agland' : 'placeholder' } ] },
@@ -1439,6 +1436,60 @@
   }
 
   render();
+  // ---- Icon overlays (togglable) ----
+  // Resource maps drawn as icons only (transparent images, see OVERLAYS in
+  // maps-config.js). Each has its own on/off switch and sits above whichever
+  // map is showing, so they can be combined with any layer.
+  (function(){
+    const defs = (typeof OVERLAYS !== 'undefined' && OVERLAYS) ? OVERLAYS : [];
+    if(!defs.length) return;
+    const gOverlays = document.createElementNS(NS, 'g');
+    gOverlays.style.pointerEvents = 'none';
+    svg.appendChild(gOverlays);
+    const bar = document.createElement('div');
+    bar.className = 'overlay-bar';
+    bar.innerHTML = '<span class="overlay-bar-title">Icons</span>';
+    const legends = document.createElement('div');
+    legends.className = 'overlay-legends';
+    mapFrame.appendChild(bar);
+    mapFrame.appendChild(legends);
+    defs.forEach(function(o){
+      const im = document.createElementNS(NS, 'image');
+      im.setAttribute('x', o.x); im.setAttribute('y', o.y);
+      im.setAttribute('width', o.width); im.setAttribute('height', o.height);
+      im.setAttribute('preserveAspectRatio', 'none');
+      im.style.display = 'none';
+      gOverlays.appendChild(im);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'overlay-btn';
+      btn.setAttribute('aria-pressed', 'false');
+      btn.title = o.caption || o.label;
+      btn.innerHTML = '<span class="overlay-btn-box"></span><span>' + o.label + '</span>';
+      bar.appendChild(btn);
+      const lg = document.createElement('div');
+      lg.className = 'overlay-legend';
+      lg.hidden = true;
+      if(o.legendImg){
+        const li = document.createElement('img');
+        li.alt = o.label + ' legend';
+        li.src = o.legendImg;
+        lg.appendChild(li);
+      }
+      legends.appendChild(lg);
+      btn.addEventListener('click', function(){
+        const on = btn.getAttribute('aria-pressed') !== 'true';
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if(on && !im.getAttribute('href')){
+          im.setAttribute('href', o.href);
+          im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', o.href);
+        }
+        im.style.display = on ? '' : 'none';
+        lg.hidden = !on;
+      });
+    });
+  })();
+
   setLayer(activeLayer);
 
   // ---- Zoom & Pan ----
