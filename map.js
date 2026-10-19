@@ -301,6 +301,7 @@
     return agDef(v[0].key).color;
   }
   const gAgByContinent = {};
+  const agUses = {};                          // ag key -> its <use> icons (for the legend switches)
   const overlayOn = {};                       // icon overlay id -> shown?
   let refreshOverlays = function(){};         // set up with the overlay bar below
   let agIconsBuilt = false;
@@ -350,6 +351,7 @@
         u.setAttribute('x', x.toFixed(2)); u.setAttribute('y', y.toFixed(2));
         u.setAttribute('width', size.toFixed(2)); u.setAttribute('height', size.toFixed(2));
         gg.appendChild(u);
+        (agUses[v[i].key] = agUses[v[i].key] || []).push(u);
       }
     });
   }
@@ -1441,25 +1443,27 @@
 
   render();
   // ---- Icon overlays (togglable) ----
-  // Resource maps drawn as icons only. Each has its own on/off switch, shown
-  // under the Economic Output tab, and sits above the map that is showing:
-  //   - Metal deposits / Rare minerals & gems: transparent images (OVERLAYS in maps-config.js)
+  // Resource maps drawn as vector icons only. Each overlay has its own on/off
+  // switch (under the Economic Output tab) and its legend rows are switches too,
+  // so a single resource (say rubber, or copper) can be shown on its own:
+  //   - Metal deposits / Rare minerals & gems / Oil & gas fields: DEPOSITS (deposits-data.js),
+  //     markers parsed from the vector source maps, positioned in map units
   //   - Agriculture land use: the per-province output icons (agland-data.js)
   (function(){
-    // OVERLAYS lives in maps-config.js; these defaults keep the toggles working if that file is older
-    const DEFAULT_OVERLAYS = [
-      { id: 'metals', label: 'Metal deposits', href: 'maps/icons_metals.webp', x: 2.753, y: 28.917, width: 1912.193, height: 874.246,
-        legendImg: 'maps/icons_metals-legend.png', caption: 'Precious and base metals, iron and the alloy metals. Bigger icon = bigger deposit.' },
-      { id: 'rare', label: 'Rare minerals & gems', href: 'maps/icons_rare.webp', x: 2.753, y: 28.917, width: 1912.193, height: 874.246,
-        legendImg: 'maps/icons_rare-legend.png', caption: 'Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit.' },
-      { id: 'oilgas', label: 'Oil & gas fields', href: 'maps/icons_oilgas.webp', x: 1.377, y: 28.01, width: 1916.4, height: 878.3,
-        legendImg: 'maps/icons_oilgas-legend.png', caption: 'Oil and gas fields. Bigger icon = giant field.' },
-      { id: 'coal', label: 'Coal basins', href: 'maps/icons_coal.webp', x: 1.377, y: 28.01, width: 1916.4, height: 878.3,
-        legendImg: 'maps/icons_coal-legend.png', caption: 'Coal basins.' } ];
-    const defs = ((typeof OVERLAYS !== 'undefined' && OVERLAYS && OVERLAYS.length) ? OVERLAYS : DEFAULT_OVERLAYS).map(function(o){ return Object.assign({ kind: 'image' }, o); });
+    const HAS_DEP = (typeof DEPOSITS !== 'undefined' && DEPOSITS && DEPOSITS.length);
+    const defs = [];
+    if(HAS_DEP){
+      defs.push({ kind: 'deposits', id: 'metals', group: 'ores', label: 'Metal deposits',
+        caption: 'Precious and base metals, iron and the alloy metals. Bigger icon = bigger deposit.' });
+      defs.push({ kind: 'deposits', id: 'rare', group: 'other', label: 'Rare minerals & gems',
+        caption: 'Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit.' });
+      defs.push({ kind: 'deposits', id: 'energy', group: 'energy', label: 'Oil & gas fields',
+        caption: 'Oil and gas fields. Bigger icon = giant field.' });
+    }
     if(AG_OK){ defs.push({ kind: 'agland', id: 'agland', label: 'Agriculture land use',
       caption: 'Which farming and fishing outputs are viable in each province. Zoom in to see every icon.' }); }
     if(!defs.length) return;
+    const XL = 'http://www.w3.org/1999/xlink';
     const gOverlays = document.createElementNS(NS, 'g');
     gOverlays.style.pointerEvents = 'none';
     svg.appendChild(gOverlays);
@@ -1472,22 +1476,104 @@
     mapFrame.appendChild(bar);
     mapFrame.appendChild(legends);
     const items = [];
-    defs.forEach(function(o){
-      const it = { o: o, im: null, lg: document.createElement('div') };
-      if(o.kind === 'image'){
-        const im = document.createElementNS(NS, 'image');
-        im.setAttribute('x', o.x); im.setAttribute('y', o.y);
-        im.setAttribute('width', o.width); im.setAttribute('height', o.height);
-        im.setAttribute('preserveAspectRatio', 'none');
-        im.style.display = 'none';
-        im.addEventListener('error', function(){
-          console.warn('Icon overlay image failed to load:', o.href);
-          it.btn.classList.add('overlay-missing');
-          it.btn.title = 'Image not found (' + o.href + ') - upload it to the maps folder';
+    const typeOff = {};                          // 'deposit id' or 'ag-key' -> hidden?
+    const depGroups = {};                        // deposit id -> <g>
+    let depDefs = null;
+
+    function ensureDepDefs(){
+      if(depDefs) return;
+      depDefs = document.createElementNS(NS, 'defs');
+      DEPOSITS.forEach(function(t){
+        t.shapes.forEach(function(d, i){
+          const p = document.createElementNS(NS, 'path');
+          p.setAttribute('id', 'dep-' + t.id + '-' + i);
+          p.setAttribute('d', d);
+          depDefs.appendChild(p);
         });
-        gOverlays.appendChild(im);
-        it.im = im;
+      });
+      svg.insertBefore(depDefs, svg.firstChild);
+    }
+    function buildDepGroup(t, parent){
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', 'dep-type');
+      g.setAttribute('data-dep', t.id);
+      g.setAttribute('fill', t.fill);
+      g.setAttribute('fill-opacity', Math.max(0.85, t.fo));
+      g.setAttribute('stroke', '#000');
+      g.setAttribute('stroke-opacity', '0.85');
+      g.setAttribute('stroke-width', '0.7');
+      g.setAttribute('stroke-linejoin', 'round');
+      const pts = t.pts.slice().sort(function(a, b){ return a[2] - b[2]; });   // giants on top
+      pts.forEach(function(q){
+        const u = document.createElementNS(NS, 'use');
+        const ref = '#dep-' + t.id + '-' + q[2];
+        u.setAttribute('href', ref);
+        u.setAttributeNS(XL, 'xlink:href', ref);
+        u.setAttribute('x', q[0]); u.setAttribute('y', q[1]);
+        g.appendChild(u);
+      });
+      parent.appendChild(g);
+      depGroups[t.id] = g;
+      return g;
+    }
+    function glyph(t){
+      const s = document.createElementNS(NS, 'svg');
+      s.setAttribute('viewBox', '-8 -8 16 16');
+      s.setAttribute('width', '18'); s.setAttribute('height', '18');
+      s.setAttribute('class', 'legend-icon');
+      s.setAttribute('aria-hidden', 'true');
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', t.shapes[Math.min(1, t.shapes.length - 1)]);
+      p.setAttribute('fill', t.fill); p.setAttribute('stroke', '#000');
+      p.setAttribute('stroke-opacity', '0.85'); p.setAttribute('stroke-width', '0.8');
+      s.appendChild(p);
+      return s;
+    }
+    // legend rows act as switches: click = show/hide that resource, double-click = only that one
+    function makeRow(key, iconNode, label, count, it){
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'legend-row overlay-type';
+      row.setAttribute('aria-pressed', 'true');
+      row.setAttribute('data-key', key);
+      row.title = 'Click to show or hide. Double-click to show only this.';
+      row.appendChild(iconNode);
+      const sp = document.createElement('span');
+      sp.className = 'legend-label';
+      sp.textContent = label;
+      row.appendChild(sp);
+      if(count != null){
+        const c = document.createElement('span');
+        c.className = 'overlay-type-n';
+        c.textContent = count;
+        row.appendChild(c);
       }
+      row.addEventListener('click', function(){ typeOff[key] = !typeOff[key]; refreshOverlays(activeLayer); });
+      row.addEventListener('dblclick', function(){
+        it.keys.forEach(function(k){ typeOff[k] = (k !== key); });
+        refreshOverlays(activeLayer);
+      });
+      it.keys.push(key);
+      it.rows[key] = row;
+      return row;
+    }
+    function allNone(it){
+      const bar2 = document.createElement('div');
+      bar2.className = 'overlay-type-tools';
+      [['All', false], ['None', true]].forEach(function(x){
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = x[0];
+        b.addEventListener('click', function(){
+          it.keys.forEach(function(k){ typeOff[k] = x[1]; });
+          refreshOverlays(activeLayer);
+        });
+        bar2.appendChild(b);
+      });
+      return bar2;
+    }
+
+    defs.forEach(function(o){
+      const it = { o: o, lg: document.createElement('div'), keys: [], rows: {}, g: null };
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'overlay-btn';
@@ -1496,23 +1582,42 @@
       btn.innerHTML = '<span class="overlay-btn-box"></span><span>' + o.label + '</span>';
       bar.appendChild(btn);
       it.btn = btn;
-      it.lg.className = 'overlay-legend' + (o.kind === 'agland' ? ' overlay-legend-ag' : '');
+      it.lg.className = 'overlay-legend overlay-legend-types';
       it.lg.hidden = true;
-      if(o.kind === 'image' && o.legendImg){
-        const li = document.createElement('img');
-        li.alt = o.label + ' legend';
-        li.src = o.legendImg;
-        it.lg.appendChild(li);
+      const head = document.createElement('div');
+      head.className = 'overlay-legend-head';
+      const ttl = document.createElement('span');
+      ttl.textContent = o.label;
+      head.appendChild(ttl);
+      it.lg.appendChild(head);
+      const list = document.createElement('div');
+      list.className = 'overlay-type-list';
+      it.lg.appendChild(list);
+      if(o.kind === 'deposits'){
+        it.g = document.createElementNS(NS, 'g');
+        it.g.style.display = 'none';
+        gOverlays.appendChild(it.g);
+        DEPOSITS.forEach(function(t){
+          if(t.group !== o.group) return;
+          list.appendChild(makeRow(t.id, glyph(t), t.label, t.n, it));
+        });
       } else if(o.kind === 'agland'){
         AG_DEFS.forEach(function(d){
-          const row = document.createElement('div');
-          row.className = 'legend-row';
-          row.innerHTML =
-            '<svg class="legend-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><use href="#ag-' + d.key + '"></use></svg>' +
-            '<span class="legend-label">' + d.label + '</span>';
-          it.lg.appendChild(row);
+          const ic = document.createElementNS(NS, 'svg');
+          ic.setAttribute('viewBox', '0 0 24 24'); ic.setAttribute('width', '20'); ic.setAttribute('height', '20');
+          ic.setAttribute('class', 'legend-icon'); ic.setAttribute('aria-hidden', 'true');
+          const u = document.createElementNS(NS, 'use');
+          u.setAttribute('href', '#ag-' + d.key);
+          ic.appendChild(u);
+          list.appendChild(makeRow('ag-' + d.key, ic, d.label, null, it));
         });
       }
+      head.appendChild(allNone(it));
+      const note = document.createElement('div');
+      note.className = 'overlay-legend-note';
+      note.textContent = o.kind === 'deposits' ? 'Bigger icon = bigger deposit. Click a row to show or hide it; double-click to show only that one.'
+        : 'Click a row to show or hide it; double-click to show only that one.';
+      it.lg.appendChild(note);
       legends.appendChild(it.lg);
       items.push(it);
       btn.addEventListener('click', function(){
@@ -1530,17 +1635,31 @@
         it.btn.setAttribute('aria-pressed', on ? 'true' : 'false');
         const show = on && here;
         it.lg.hidden = !show;
-        if(it.im){
-          if(show && !it.im.getAttribute('href')){
-            it.im.setAttribute('href', it.o.href);
-            it.im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', it.o.href);
+        it.keys.forEach(function(k){
+          const r = it.rows[k];
+          r.setAttribute('aria-pressed', typeOff[k] ? 'false' : 'true');
+          r.classList.toggle('off', !!typeOff[k]);
+        });
+        if(it.g){
+          if(show){
+            ensureDepDefs();
+            if(!it.g.firstChild){
+              DEPOSITS.forEach(function(t){ if(t.group === it.o.group) buildDepGroup(t, it.g); });
+            }
           }
-          it.im.style.display = show ? '' : 'none';
+          it.g.style.display = show ? '' : 'none';
+          Object.keys(depGroups).forEach(function(id){
+            if(it.rows[id]) depGroups[id].style.display = typeOff[id] ? 'none' : '';
+          });
         }
       });
       const agOn = (layer && layer.type === 'agland') || (!!overlayOn.agland && here);
       if(agOn){ ensureAgIcons(); }
       Object.keys(gAgByContinent).forEach(function(k){ gAgByContinent[k].style.display = agOn ? '' : 'none'; });
+      Object.keys(agUses).forEach(function(key){
+        const off = !!typeOff['ag-' + key];
+        agUses[key].forEach(function(u){ u.style.display = off ? 'none' : ''; });
+      });
     };
   })();
 
