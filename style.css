@@ -888,7 +888,12 @@ button.btn-load:hover{ background: rgba(0,0,0,0.05); }
 .overlay-legend{ background:#f6fafb; border:1px solid var(--ink); border-radius:4px; padding:3px; box-shadow:0 3px 12px rgba(0,0,0,0.3); }
 .overlay-legend img{ display:block; width:min(300px,100%); height:auto; }
 @media (max-width:700px){
-  .overlay-bar{ top:auto; bottom:64px; right:12px; max-width:calc(100% - 24px); }
-  .overlay-legends{ left:12px; bottom:112px; }
-  .overlay-legend img{ width:170px; }
+  .overlay-bar{ top:96px; left:12px; right:auto; justify-content:flex-start; max-width:calc(100% - 24px); }
+  .overlay-legends{ left:12px; bottom:64px; flex-direction:row; flex-wrap:wrap; align-items:flex-end; max-width:calc(100% - 24px); }
+  .overlay-legend img{ width:150px; }
+  .overlay-legend-ag{ display:grid; grid-template-columns:1fr 1fr; column-gap:10px; padding:5px 8px; min-width:0; }
+  .overlay-legend-ag .legend-row{ font-size:10.5px; padding:1px 0; gap:5px; }
+  .overlay-legend-ag .legend-icon{ width:14px; height:14px; max-width:14px; }
 }
+.overlay-legend-ag{ background: color-mix(in srgb, var(--panel-bg) 85%, transparent); backdrop-filter: blur(4px); padding:8px 12px; min-width:150px; }
+.overlay-bar[hidden], .overlay-legend[hidden]{ display:none; }

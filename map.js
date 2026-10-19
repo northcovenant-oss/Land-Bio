@@ -63,9 +63,7 @@
       { id: 'provinces', label: 'Provinces', type: 'neutral' } ] },
     { id: 'economic', label: 'Economic Output', maps: [
       { id: 'economic', label: 'Sector Map', type: 'data' },
-      imageMap('fisheries', 'Fisheries'),
-      // Icon map of which farming/fishing outputs are viable (data in agland-data.js)
-      { id: 'agland', label: 'Agriculture Land Use', type: (typeof AGLAND !== 'undefined') ? 'agland' : 'placeholder' } ] },
+      imageMap('fisheries', 'Fisheries') ] },
     { id: 'bioclimate', label: 'Bioclimate', maps: [
       // the existing province-colored climate map stays the default
       { id: 'climate', label: 'Province climate', type: 'climate' },
@@ -303,6 +301,8 @@
     return agDef(v[0].key).color;
   }
   const gAgByContinent = {};
+  const overlayOn = {};                       // icon overlay id -> shown?
+  let refreshOverlays = function(){};         // set up with the overlay bar below
   let agIconsBuilt = false;
   function ensureAgIcons(){
     if(agIconsBuilt || !AG_OK) return;
@@ -608,7 +608,6 @@
       legend.appendChild(cap);
     }
     if(layer.type === 'agland'){ buildAgLegend(); }
-    Object.keys(gAgByContinent).forEach(function(k){ gAgByContinent[k].style.display = (layer.type === 'agland') ? '' : 'none'; });
     const activeLegendData = layer.type === 'climate' ? CLIMATE_LEGEND
       : (layer.type === 'data' ? ECON_LEGEND : (layer.type === 'image' ? imgLegend : null));
     if(activeLegendData){ buildLegend(activeLegendData, layer.type); }
@@ -624,6 +623,7 @@
     Object.keys(imageEls).forEach(function(k){ imageEls[k].style.display = (layer.imageKey === k) ? '' : 'none'; });
     gTerrain.style.display = (layer.type === 'image') ? '' : 'none';
     gPending.style.display = (layer.type === 'image') ? 'none' : '';
+    refreshOverlays(layer);
   }
 
   // ---- Legends ----
@@ -665,6 +665,10 @@
         sub = p.econ;
       }
       if(p.hub) sub = '\u2605 ' + p.hub + ' hub \u00b7 ' + sub;
+      if(overlayOn.agland && AG_OK){
+        const v = agViable(p.label);
+        sub += ' \u00b7 Ag: ' + (v.length ? v.map(function(o){ return agDef(o.key).label; }).join(', ') : 'none');
+      }
     } else if(activeLayer.type === 'agland'){
       const v = agViable(p.label);
       sub = v.length ? v.map(function(o){ return agDef(o.key).label; }).join(', ') : 'No viable agriculture';
@@ -1437,29 +1441,38 @@
 
   render();
   // ---- Icon overlays (togglable) ----
-  // Resource maps drawn as icons only (transparent images, see OVERLAYS in
-  // maps-config.js). Each has its own on/off switch and sits above whichever
-  // map is showing, so they can be combined with any layer.
+  // Resource maps drawn as icons only. Each has its own on/off switch, shown
+  // under the Economic Output tab, and sits above the map that is showing:
+  //   - Metal deposits / Rare minerals & gems: transparent images (OVERLAYS in maps-config.js)
+  //   - Agriculture land use: the per-province output icons (agland-data.js)
   (function(){
-    const defs = (typeof OVERLAYS !== 'undefined' && OVERLAYS) ? OVERLAYS : [];
+    const defs = ((typeof OVERLAYS !== 'undefined' && OVERLAYS) ? OVERLAYS : []).map(function(o){ return Object.assign({ kind: 'image' }, o); });
+    if(AG_OK){ defs.push({ kind: 'agland', id: 'agland', label: 'Agriculture land use',
+      caption: 'Which farming and fishing outputs are viable in each province. Zoom in to see every icon.' }); }
     if(!defs.length) return;
     const gOverlays = document.createElementNS(NS, 'g');
     gOverlays.style.pointerEvents = 'none';
     svg.appendChild(gOverlays);
     const bar = document.createElement('div');
     bar.className = 'overlay-bar';
+    bar.hidden = true;
     bar.innerHTML = '<span class="overlay-bar-title">Icons</span>';
     const legends = document.createElement('div');
     legends.className = 'overlay-legends';
     mapFrame.appendChild(bar);
     mapFrame.appendChild(legends);
+    const items = [];
     defs.forEach(function(o){
-      const im = document.createElementNS(NS, 'image');
-      im.setAttribute('x', o.x); im.setAttribute('y', o.y);
-      im.setAttribute('width', o.width); im.setAttribute('height', o.height);
-      im.setAttribute('preserveAspectRatio', 'none');
-      im.style.display = 'none';
-      gOverlays.appendChild(im);
+      const it = { o: o, im: null, lg: document.createElement('div') };
+      if(o.kind === 'image'){
+        const im = document.createElementNS(NS, 'image');
+        im.setAttribute('x', o.x); im.setAttribute('y', o.y);
+        im.setAttribute('width', o.width); im.setAttribute('height', o.height);
+        im.setAttribute('preserveAspectRatio', 'none');
+        im.style.display = 'none';
+        gOverlays.appendChild(im);
+        it.im = im;
+      }
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'overlay-btn';
@@ -1467,27 +1480,51 @@
       btn.title = o.caption || o.label;
       btn.innerHTML = '<span class="overlay-btn-box"></span><span>' + o.label + '</span>';
       bar.appendChild(btn);
-      const lg = document.createElement('div');
-      lg.className = 'overlay-legend';
-      lg.hidden = true;
-      if(o.legendImg){
+      it.btn = btn;
+      it.lg.className = 'overlay-legend' + (o.kind === 'agland' ? ' overlay-legend-ag' : '');
+      it.lg.hidden = true;
+      if(o.kind === 'image' && o.legendImg){
         const li = document.createElement('img');
         li.alt = o.label + ' legend';
         li.src = o.legendImg;
-        lg.appendChild(li);
+        it.lg.appendChild(li);
+      } else if(o.kind === 'agland'){
+        AG_DEFS.forEach(function(d){
+          const row = document.createElement('div');
+          row.className = 'legend-row';
+          row.innerHTML =
+            '<svg class="legend-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><use href="#ag-' + d.key + '"></use></svg>' +
+            '<span class="legend-label">' + d.label + '</span>';
+          it.lg.appendChild(row);
+        });
       }
-      legends.appendChild(lg);
+      legends.appendChild(it.lg);
+      items.push(it);
       btn.addEventListener('click', function(){
-        const on = btn.getAttribute('aria-pressed') !== 'true';
-        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        if(on && !im.getAttribute('href')){
-          im.setAttribute('href', o.href);
-          im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', o.href);
-        }
-        im.style.display = on ? '' : 'none';
-        lg.hidden = !on;
+        overlayOn[o.id] = !overlayOn[o.id];
+        refreshOverlays(activeLayer);
       });
     });
+    refreshOverlays = function(layer){
+      const here = !!layer && layer.group === 'economic';
+      bar.hidden = !here;
+      items.forEach(function(it){
+        const on = !!overlayOn[it.o.id];
+        it.btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const show = on && here;
+        it.lg.hidden = !show;
+        if(it.im){
+          if(show && !it.im.getAttribute('href')){
+            it.im.setAttribute('href', it.o.href);
+            it.im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', it.o.href);
+          }
+          it.im.style.display = show ? '' : 'none';
+        }
+      });
+      const agOn = (layer && layer.type === 'agland') || (!!overlayOn.agland && here);
+      if(agOn){ ensureAgIcons(); }
+      Object.keys(gAgByContinent).forEach(function(k){ gAgByContinent[k].style.display = agOn ? '' : 'none'; });
+    };
   })();
 
   setLayer(activeLayer);
