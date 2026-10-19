@@ -897,3 +897,4 @@ button.btn-load:hover{ background: rgba(0,0,0,0.05); }
 }
 .overlay-legend-ag{ background: color-mix(in srgb, var(--panel-bg) 85%, transparent); backdrop-filter: blur(4px); padding:8px 12px; min-width:150px; }
 .overlay-bar[hidden], .overlay-legend[hidden]{ display:none; }
+.overlay-btn.overlay-missing{ opacity:.55; text-decoration:line-through; }
