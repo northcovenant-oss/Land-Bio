@@ -667,6 +667,7 @@
       } else {
         sub = p.econ;
       }
+      if(p.hub) sub = '\u2605 ' + p.hub + ' hub \u00b7 ' + sub;
     } else if(activeLayer.type === 'agland'){
       const v = agViable(p.label);
       sub = v.length ? v.map(function(o){ return agDef(o.key).label; }).join(', ') : 'No viable agriculture';
