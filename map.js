@@ -1450,15 +1450,18 @@
   //     markers parsed from the vector source maps, positioned in map units
   //   - Agriculture land use: the per-province output icons (agland-data.js)
   (function(){
-    const HAS_DEP = (typeof DEPOSITS !== 'undefined' && DEPOSITS && DEPOSITS.length);
+    const OFF_DEP = (typeof DEPOSITS_DISABLED !== 'undefined' && DEPOSITS_DISABLED) ? DEPOSITS_DISABLED : [];
+    const DEP = (typeof DEPOSITS !== 'undefined' && DEPOSITS) ? DEPOSITS.filter(function(t){ return OFF_DEP.indexOf(t.id) < 0; }) : [];
+    const AREAS = (typeof DEPOSIT_AREAS !== 'undefined' && DEPOSIT_AREAS) ? DEPOSIT_AREAS.filter(function(a){ return OFF_DEP.indexOf(a.id) < 0; }) : [];
+    const HAS_DEP = DEP.length > 0;
     const defs = [];
     if(HAS_DEP){
       defs.push({ kind: 'deposits', id: 'metals', group: 'ores', label: 'Metal deposits',
         caption: 'Precious and base metals, iron and the alloy metals. Bigger icon = bigger deposit.' });
       defs.push({ kind: 'deposits', id: 'rare', group: 'other', label: 'Rare minerals & gems',
         caption: 'Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit.' });
-      defs.push({ kind: 'deposits', id: 'energy', group: 'energy', label: 'Oil & gas fields',
-        caption: 'Oil and gas fields. Bigger icon = giant field.' });
+      defs.push({ kind: 'deposits', id: 'energy', group: 'energy', label: 'Oil, gas & coal',
+        caption: 'Oil and gas fields, coal basins and areas with oil and gas potential. Bigger icon = giant field.' });
     }
     if(AG_OK){ defs.push({ kind: 'agland', id: 'agland', label: 'Agriculture land use',
       caption: 'Which farming and fishing outputs are viable in each province. Zoom in to see every icon.' }); }
@@ -1483,7 +1486,7 @@
     function ensureDepDefs(){
       if(depDefs) return;
       depDefs = document.createElementNS(NS, 'defs');
-      DEPOSITS.forEach(function(t){
+      DEP.forEach(function(t){
         t.shapes.forEach(function(d, i){
           const p = document.createElementNS(NS, 'path');
           p.setAttribute('id', 'dep-' + t.id + '-' + i);
@@ -1515,6 +1518,30 @@
       parent.appendChild(g);
       depGroups[t.id] = g;
       return g;
+    }
+    function buildAreaGroup(a, parent){
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('class', 'dep-area');
+      p.setAttribute('data-dep', a.id);
+      p.setAttribute('d', a.d);
+      p.setAttribute('fill', a.fill); p.setAttribute('fill-opacity', a.fo);
+      p.setAttribute('fill-rule', 'evenodd');
+      p.setAttribute('stroke', a.stroke || a.fill); p.setAttribute('stroke-opacity', '0.7');
+      p.setAttribute('stroke-width', '0.5'); p.setAttribute('stroke-linejoin', 'round');
+      parent.appendChild(p);
+      depGroups[a.id] = p;
+    }
+    function areaGlyph(a){
+      const s = document.createElementNS(NS, 'svg');
+      s.setAttribute('viewBox', '-8 -8 16 16');
+      s.setAttribute('width', '18'); s.setAttribute('height', '18');
+      s.setAttribute('class', 'legend-icon'); s.setAttribute('aria-hidden', 'true');
+      const r = document.createElementNS(NS, 'rect');
+      r.setAttribute('x', '-7'); r.setAttribute('y', '-5'); r.setAttribute('width', '14'); r.setAttribute('height', '10');
+      r.setAttribute('rx', '2'); r.setAttribute('fill', a.fill); r.setAttribute('fill-opacity', Math.min(1, a.fo + 0.2));
+      r.setAttribute('stroke', a.stroke || a.fill); r.setAttribute('stroke-width', '0.8');
+      s.appendChild(r);
+      return s;
     }
     function glyph(t){
       const s = document.createElementNS(NS, 'svg');
@@ -1597,7 +1624,11 @@
         it.g = document.createElementNS(NS, 'g');
         it.g.style.display = 'none';
         gOverlays.appendChild(it.g);
-        DEPOSITS.forEach(function(t){
+        AREAS.forEach(function(a){
+          if(a.group !== o.group) return;
+          list.appendChild(makeRow(a.id, areaGlyph(a), a.label, null, it));
+        });
+        DEP.forEach(function(t){
           if(t.group !== o.group) return;
           list.appendChild(makeRow(t.id, glyph(t), t.label, t.n, it));
         });
@@ -1644,7 +1675,8 @@
           if(show){
             ensureDepDefs();
             if(!it.g.firstChild){
-              DEPOSITS.forEach(function(t){ if(t.group === it.o.group) buildDepGroup(t, it.g); });
+              AREAS.forEach(function(a){ if(a.group === it.o.group) buildAreaGroup(a, it.g); });
+              DEP.forEach(function(t){ if(t.group === it.o.group) buildDepGroup(t, it.g); });
             }
           }
           it.g.style.display = show ? '' : 'none';
