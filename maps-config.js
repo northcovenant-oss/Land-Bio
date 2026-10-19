@@ -356,5 +356,21 @@ const OVERLAYS = [
     "x": 2.753, "y": 28.917, "width": 1912.193, "height": 874.246,
     "legendImg": "maps/icons_rare-legend.png",
     "caption": "Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit."
+  },
+  {
+    "id": "oilgas",
+    "label": "Oil & gas fields",
+    "href": "maps/icons_oilgas.webp",
+    "x": 1.377, "y": 28.01, "width": 1916.4, "height": 878.3,
+    "legendImg": "maps/icons_oilgas-legend.png",
+    "caption": "Oil and gas fields. Bigger icon = giant field."
+  },
+  {
+    "id": "coal",
+    "label": "Coal basins",
+    "href": "maps/icons_coal.webp",
+    "x": 1.377, "y": 28.01, "width": 1916.4, "height": 878.3,
+    "legendImg": "maps/icons_coal-legend.png",
+    "caption": "Coal basins."
   }
 ];

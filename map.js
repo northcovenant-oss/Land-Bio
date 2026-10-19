@@ -1440,70 +1440,6 @@
   }
 
   render();
-  // ---- Energy deposit icons ----
-  // Oil, gas and coal deposits for the Energy provinces (the resource each one
-  // rolled in landbio-rolls.js). Drawn as free-standing deposit markers - set
-  // off-centre inside the province rather than filling it - and sized by how
-  // rich the province's energy roll is. Shown with the other icon overlays.
-  const EN_ROLLS = (typeof PROVINCE_LAND_BIO_ROLLS !== 'undefined') ? PROVINCE_LAND_BIO_ROLLS : null;
-  const EN_OK = !!EN_ROLLS;
-  const EN_DEFS = [
-    { key: 'Oil',         id: 'oil',  label: 'Oil',         color: '#2b2622' },
-    { key: 'Natural Gas', id: 'gas',  label: 'Natural gas', color: '#2f8fd6' },
-    { key: 'Coal',        id: 'coal', label: 'Coal',        color: '#5a5a5e' },
-  ];
-  const EN_GLYPHS = {
-    oil:  '<path d="M12 2.6C12 2.6 5.4 10.2 5.4 14.8a6.6 6.6 0 0 0 13.2 0C18.6 10.2 12 2.6 12 2.6z" fill="C" stroke="#111" stroke-width="1.3"/>' +
-          '<path d="M8.8 15a3.4 3.4 0 0 0 2.6 3.2" stroke="#fff" stroke-opacity=".75" stroke-width="1.4" fill="none" stroke-linecap="round"/>',
-    gas:  '<path d="M12 2.4c1 3.6 5.8 5.6 5.8 11a5.8 5.8 0 0 1-11.6 0c0-2.4 1-3.8 2.2-5 .2 1.6.9 2.6 1.9 3C10 8.2 10.6 5 12 2.4z" fill="C" stroke="#0b2a44" stroke-width="1.3" stroke-linejoin="round"/>' +
-          '<path d="M12 19.6a2.6 2.6 0 0 1-2.6-2.6c0-1.6 1.4-2.4 2.6-4 1.2 1.6 2.6 2.4 2.6 4a2.6 2.6 0 0 1-2.6 2.6z" fill="#cfe9fb"/>',
-    coal: '<path d="M12 2.8l7.6 4.2v8.4L12 19.6 4.4 15.4V7z" fill="C" stroke="#111" stroke-width="1.3" stroke-linejoin="round"/>' +
-          '<path d="M4.4 7L12 11.2 19.6 7M12 11.2v8.4" stroke="#fff" stroke-opacity=".55" stroke-width="1" fill="none"/>',
-  };
-  const gEnByContinent = {};
-  let enIconsBuilt = false;
-  function ensureEnIcons(){
-    if(enIconsBuilt || !EN_OK) return;
-    enIconsBuilt = true;
-    const defs = document.createElementNS(NS, 'defs');
-    EN_DEFS.forEach(function(d){
-      const sym = document.createElementNS(NS, 'symbol');
-      sym.setAttribute('id', 'en-' + d.id);
-      sym.setAttribute('viewBox', '0 0 24 24');
-      sym.innerHTML = EN_GLYPHS[d.id].replace(/"C"/g, '"' + d.color + '"');
-      defs.appendChild(sym);
-    });
-    svg.insertBefore(defs, svg.firstChild);
-    CONTINENT_ORDER.forEach(function(cid){
-      const gg = document.createElementNS(NS, 'g');
-      gg.setAttribute('class', 'en-icons');
-      gg.style.pointerEvents = 'none';
-      gg.style.display = 'none';
-      CONTINENT_GROUPS[cid].appendChild(gg);
-      gEnByContinent[cid] = gg;
-    });
-    const eps = PROVINCES.filter(function(p){ return p.econ === 'Energy' && EN_ROLLS[p.label] && EN_ROLLS[p.label].resource; });
-    const rolls = eps.map(function(p){ return EN_ROLLS[p.label].energyRoll; }).sort(function(a, b){ return a - b; });
-    function tier(v){ const r = rolls.indexOf(v) / Math.max(1, rolls.length - 1); return r > 0.66 ? 2 : (r > 0.33 ? 1 : 0); }
-    function hash(str){ let h = 2166136261; for(let i = 0; i < str.length; i++){ h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0; } return h; }
-    eps.forEach(function(p){
-      const c = centroid(p.d), bb = pathBBox(p.d);
-      if(!c || !bb) return;
-      const def = EN_DEFS.filter(function(d){ return d.key === EN_ROLLS[p.label].resource; })[0];
-      if(!def) return;
-      const h = hash(p.label + 'en');
-      const jx = (((h & 255) / 255) - 0.5) * 0.5 * (bb.maxX - bb.minX);
-      const jy = ((((h >>> 8) & 255) / 255) - 0.5) * 0.5 * (bb.maxY - bb.minY);
-      const size = [8, 11, 14][tier(EN_ROLLS[p.label].energyRoll)];
-      const u = document.createElementNS(NS, 'use');
-      u.setAttribute('href', '#en-' + def.id);
-      u.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#en-' + def.id);
-      u.setAttribute('x', (c.x + jx - size / 2).toFixed(2)); u.setAttribute('y', (c.y + jy - size / 2).toFixed(2));
-      u.setAttribute('width', size); u.setAttribute('height', size);
-      (gEnByContinent[p.continent] || gEnByContinent[CONTINENT_ORDER[0]]).appendChild(u);
-    });
-  }
-
   // ---- Icon overlays (togglable) ----
   // Resource maps drawn as icons only. Each has its own on/off switch, shown
   // under the Economic Output tab, and sits above the map that is showing:
@@ -1515,10 +1451,12 @@
       { id: 'metals', label: 'Metal deposits', href: 'maps/icons_metals.webp', x: 2.753, y: 28.917, width: 1912.193, height: 874.246,
         legendImg: 'maps/icons_metals-legend.png', caption: 'Precious and base metals, iron and the alloy metals. Bigger icon = bigger deposit.' },
       { id: 'rare', label: 'Rare minerals & gems', href: 'maps/icons_rare.webp', x: 2.753, y: 28.917, width: 1912.193, height: 874.246,
-        legendImg: 'maps/icons_rare-legend.png', caption: 'Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit.' } ];
+        legendImg: 'maps/icons_rare-legend.png', caption: 'Rare earths, gems, industrial minerals and uranium. Bigger icon = bigger deposit.' },
+      { id: 'oilgas', label: 'Oil & gas fields', href: 'maps/icons_oilgas.webp', x: 1.377, y: 28.01, width: 1916.4, height: 878.3,
+        legendImg: 'maps/icons_oilgas-legend.png', caption: 'Oil and gas fields. Bigger icon = giant field.' },
+      { id: 'coal', label: 'Coal basins', href: 'maps/icons_coal.webp', x: 1.377, y: 28.01, width: 1916.4, height: 878.3,
+        legendImg: 'maps/icons_coal-legend.png', caption: 'Coal basins.' } ];
     const defs = ((typeof OVERLAYS !== 'undefined' && OVERLAYS && OVERLAYS.length) ? OVERLAYS : DEFAULT_OVERLAYS).map(function(o){ return Object.assign({ kind: 'image' }, o); });
-    if(EN_OK){ defs.push({ kind: 'energy', id: 'energy', label: 'Energy deposits',
-      caption: 'Oil, gas and coal deposits. Bigger icon = richer deposit.' }); }
     if(AG_OK){ defs.push({ kind: 'agland', id: 'agland', label: 'Agriculture land use',
       caption: 'Which farming and fishing outputs are viable in each province. Zoom in to see every icon.' }); }
     if(!defs.length) return;
@@ -1565,20 +1503,6 @@
         li.alt = o.label + ' legend';
         li.src = o.legendImg;
         it.lg.appendChild(li);
-      } else if(o.kind === 'energy'){
-        it.lg.classList.add('overlay-legend-ag');
-        EN_DEFS.forEach(function(d){
-          const row = document.createElement('div');
-          row.className = 'legend-row';
-          row.innerHTML =
-            '<svg class="legend-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><use href="#en-' + d.id + '"></use></svg>' +
-            '<span class="legend-label">' + d.label + '</span>';
-          it.lg.appendChild(row);
-        });
-        const note = document.createElement('div');
-        note.className = 'legend-caption';
-        note.textContent = 'Bigger icon = richer deposit';
-        it.lg.appendChild(note);
       } else if(o.kind === 'agland'){
         AG_DEFS.forEach(function(d){
           const row = document.createElement('div');
@@ -1597,7 +1521,6 @@
       });
     });
     // legend swatches reference the icon symbols, so define them up front
-    if(EN_OK){ ensureEnIcons(); }
     if(AG_OK){ ensureAgIcons(); }
     refreshOverlays = function(layer){
       const here = !!layer && layer.group === 'economic';
@@ -1615,9 +1538,6 @@
           it.im.style.display = show ? '' : 'none';
         }
       });
-      const enOn = !!overlayOn.energy && here;
-      if(enOn){ ensureEnIcons(); }
-      Object.keys(gEnByContinent).forEach(function(k){ gEnByContinent[k].style.display = enOn ? '' : 'none'; });
       const agOn = (layer && layer.type === 'agland') || (!!overlayOn.agland && here);
       if(agOn){ ensureAgIcons(); }
       Object.keys(gAgByContinent).forEach(function(k){ gAgByContinent[k].style.display = agOn ? '' : 'none'; });
